@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ChromaClash - Disconnect Handler</title>
+</head>
+<body>
+    <h1>ChromaClash Disconnect Test</h1>
+    
+    <div>
+        <input type="text" id="roomInput" placeholder="Enter Room Code" value="ROOM1" />
+        <button id="joinBtn">Join Room</button>
+    </div>
+
+    <div id="gameArea" style="margin-top: 20px; display: none;">
+        <h2 id="turnBanner" style="color: darkblue;">Waiting for 2nd player...</h2>
+        <div id="scoreBanner" style="font-weight: bold; margin-bottom: 10px;"></div>
+
+        <div>
+            <h3>Server Discard Pile</h3>
+            <div id="discardPile" style="background: #f0f0f0; padding: 10px; border: 1px solid #ccc; min-height: 40px;">
+                <i>No cards played yet</i>
+            </div>
+        </div>
+
+        <div style="margin-top: 15px;">
+            <h3>Play a Card</h3>
+            <button class="playBtn" onclick="playCard('Red Dragon')">Play Red Dragon</button>
+            <button class="playBtn" onclick="playCard('Blue Shield')">Play Blue Shield</button>
+        </div>
+
+        <div id="errorLog" style="color: red; margin-top: 15px; font-weight: bold;"></div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let currentRoom = "";
+
+        const joinBtn = document.getElementById("joinBtn");
+        const roomInput = document.getElementById("roomInput");
+        const gameArea = document.getElementById("gameArea");
+        const discardPileDiv = document.getElementById("discardPile");
+        const turnBanner = document.getElementById("turnBanner");
+        const scoreBanner = document.getElementById("scoreBanner");
+        const errorLog = document.getElementById("errorLog");
+
+        joinBtn.addEventListener("click", () => {
+            const roomCode = roomInput.value.trim();
+            if (roomCode) {
+                currentRoom = roomCode;
+                socket.emit("joinRoom", currentRoom);
+                gameArea.style.display = "block";
+            }
+        });
+
+        function playCard(cardName) {
+            errorLog.innerText = "";
+            socket.emit("playCard", {
+                roomCode: currentRoom,
+                card: cardName
+            });
+        }
+
+        socket.on("moveRejected", (reason) => {
+            errorLog.innerText = `⚠️ Action Denied: ${reason}`;
+        });
+
+        // Step 25: Handle player disconnect alert
+        socket.on("playerDisconnected", (data) => {
+            errorLog.innerText = `🚨 Opponent (${data.disconnectedPlayerId.substring(0, 5)}...) disconnected! Waiting for a new player...`;
+        });
+
+        socket.on("gameOver", (data) => {
+            const isMe = data.winnerId === socket.id;
+            turnBanner.innerText = isMe ? "🎉 VICTORY!" : "💀 DEFEAT!";
+            document.querySelectorAll(".playBtn").forEach(btn => btn.disabled = true);
+        });
+
+        socket.on("gameStateUpdate", (state) => {
+            if (state.status === "finished") return;
+
+            if (state.status === "waiting") {
+                turnBanner.innerText = `Waiting for 1 more player... (${state.playerCount}/2)`;
+                return;
+            }
+
+            let scoreText = "Scores: ";
+            for (let id in state.scores) {
+                scoreText += `[Player ${id.substring(0, 5)}...: ${state.scores[id]}] `;
+            }
+            scoreBanner.innerText = scoreText;
+
+            const isMyTurn = state.activePlayer === socket.id;
+            if (isMyTurn) {
+                turnBanner.innerText = "⭐ YOUR TURN!";
+                turnBanner.style.color = "green";
+            } else {
+                turnBanner.innerText = `⏳ Opponent's Turn...`;
+                turnBanner.style.color = "orange";
+            }
+
+            if (state.discardPile.length > 0) {
+                discardPileDiv.innerHTML = state.discardPile.map(item => 
+                    `<div><b>Player ${item.playedBy.substring(0, 5)}...</b> played <b>${item.card}</b></div>`
+                ).join("");
+            }
+        });
+    </script>
+</body>
+</html>
