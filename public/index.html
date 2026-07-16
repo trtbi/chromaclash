@@ -1,110 +1,473 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>ChromaClash - Disconnect Handler</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chroma Clash - Online Multiplayer</title>
+<style>
+  :root{
+    --bg-base:#fbfaf8;
+    --panel:#ffffff;
+    --panel-2:#f4f2ec;
+    --brass:#B8860B;
+    --brass-soft:#C9A227;
+    --ink:#2A2A28;
+    --ink-dim:#6E6A62;
+    --line:#E4E0D6;
+    --danger:#D93036;
+    --success:#1F8F57;
+    --radius:12px;
+    --font-display: Georgia,'Iowan Old Style','Palatino Linotype',serif;
+    --font-body: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:var(--font-body);
+    color:var(--ink);
+    background:
+      linear-gradient(120deg,
+        rgba(229,72,77,0.08) 0%,
+        rgba(247,107,21,0.08) 14%,
+        rgba(255,214,10,0.10) 28%,
+        rgba(48,164,108,0.08) 42%,
+        rgba(59,130,246,0.08) 57%,
+        rgba(139,92,246,0.08) 71%,
+        rgba(236,72,153,0.08) 86%,
+        rgba(229,72,77,0.06) 100%),
+      var(--bg-base);
+    background-attachment:fixed;
+    min-height:100vh;
+    overflow-x:hidden;
+  }
+  #app{
+    max-width:1100px;
+    margin:0 auto;
+    padding:18px 14px 40px;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+  }
+  h1.brand{
+    font-family:var(--font-display);
+    font-weight:700;
+    letter-spacing:0.06em;
+    text-align:center;
+    font-size:28px;
+    margin:6px 0 2px;
+    color:var(--brass);
+    text-shadow:0 0 18px rgba(201,162,39,0.15);
+  }
+  .tagline{
+    text-align:center;
+    color:var(--ink-dim);
+    font-size:12.5px;
+    letter-spacing:0.12em;
+    text-transform:uppercase;
+    margin-bottom:14px;
+  }
+  .status-banner{
+    text-align:center;
+    font-weight:800;
+    font-size:17px;
+    color:var(--brass);
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:11px 16px;
+    margin:0 auto 16px;
+    max-width:520px;
+    letter-spacing:.01em;
+    box-shadow:0 2px 10px rgba(0,0,0,.04);
+  }
+
+  /* ---- Start screen ---- */
+  .start-card{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:26px 22px;
+    max-width:520px;
+    margin:20px auto;
+    text-align:center;
+    box-shadow:0 4px 20px rgba(0,0,0,.04);
+  }
+  .start-card p{color:var(--ink-dim);font-size:14px;line-height:1.6;}
+  .start-card .rules{
+    text-align:left;
+    font-size:13px;
+    color:var(--ink-dim);
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:14px 16px;
+    margin:16px 0;
+    line-height:1.65;
+  }
+  .start-card .rules b{color:var(--ink);}
+  .room-input{
+    width: 100%;
+    max-width: 280px;
+    padding: 12px 16px;
+    font-size: 16px;
+    border: 2px solid var(--line);
+    border-radius: 8px;
+    margin-bottom: 12px;
+    text-align: center;
+    text-transform: uppercase;
+    font-weight: bold;
+    letter-spacing: 0.05em;
+  }
+  .room-input:focus{
+    outline: none;
+    border-color: var(--brass);
+  }
+  .go-btn{
+    margin-top:10px;
+    background:var(--brass);
+    color:#fff;
+    border:none;
+    font-weight:700;
+    font-family:var(--font-body);
+    font-size:15px;
+    padding:12px 30px;
+    border-radius:999px;
+    cursor:pointer;
+    letter-spacing:0.03em;
+  }
+  .go-btn:hover{background:var(--brass-soft);}
+
+  /* ---- Table layout ---- */
+  .game-layout{display:flex;gap:16px;align-items:flex-start;}
+  .game-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:14px;}
+  .game-side{width:250px;flex-shrink:0;}
+  @media (max-width:760px){
+    .game-layout{flex-direction:column;}
+    .game-side{width:100%;}
+  }
+
+  .opponents{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(120px,1fr));
+    gap:10px;
+  }
+  .opp{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:10px 12px;
+    text-align:center;
+    position:relative;
+    transition:all .15s ease;
+  }
+  .opp.active-turn{border-color:var(--brass-soft); box-shadow: 0 0 8px rgba(201,162,39,0.3);}
+  .opp .name{font-size:13px;font-weight:600;letter-spacing:.02em;}
+  .opp .sub{font-size:11px;color:var(--ink-dim);margin-top:3px;}
+
+  .center-stage{
+    background:radial-gradient(ellipse at center, #ffffff 0%, #f6f4ee 65%, transparent 100%);
+    border:1px solid var(--line);
+    border-radius:14px;
+    min-height:190px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:14px 16px;
+    gap:10px;
+    position:relative;
+  }
+  .pile-info{
+    text-align:center;
+    font-size:11px;
+    color:var(--ink-dim);
+    letter-spacing:.05em;
+    text-transform:uppercase;
+    flex-shrink:0;
+  }
+  .pile-info .count{
+    font-family:var(--font-display);
+    font-size:26px;
+    color:var(--ink);
+    display:block;
+  }
+  .duel-area{
+    flex:1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    min-height:150px;
+    gap:18px;
+  }
+
+  .card{
+    width:64px;height:92px;
+    border-radius:8px;
+    border:2px solid rgba(0,0,0,.35);
+    display:flex;flex-direction:column;justify-content:space-between;
+    padding:5px 6px;
+    font-family:var(--font-display);
+    font-weight:700;
+    cursor:pointer;
+    position:relative;
+    box-shadow:0 3px 8px rgba(0,0,0,.18);
+    transition: transform .12s ease;
+    flex-shrink:0;
+  }
+  .card:hover{transform:translateY(-6px);}
+  .card .corner{font-size:14px;line-height:1;}
+  .card .corner.bottom{align-self:flex-end;transform:rotate(180deg);}
+  .card .mid{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:20px; text-align: center;}
+
+  /* Player area */
+  .player-area{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:14px 16px 16px;
+  }
+  .player-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+  .player-head .who{font-weight:700;font-size:14px;}
+  .hand{display:flex;gap:8px;flex-wrap:wrap;min-height:96px;}
+
+  .prompt{
+    text-align:center;
+    font-size:13.5px;
+    color:var(--brass);
+    margin:6px 0 12px;
+    letter-spacing:.02em;
+  }
+
+  .history-panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:14px 14px;
+  }
+  .history-title{
+    font-weight:700;
+    font-size:11.5px;
+    letter-spacing:.1em;
+    text-transform:uppercase;
+    color:var(--ink-dim);
+    margin-bottom:10px;
+  }
+  .log-panel{
+    max-height:520px;
+    overflow-y:auto;
+    font-size:12px;
+    color:var(--ink-dim);
+    line-height:1.7;
+  }
+  .log-panel div{padding:4px 0;border-bottom:1px dashed var(--line);}
+  .log-panel div:last-child{color:var(--ink);font-weight:600;border-bottom:none;}
+
+  .overlay{
+    position:fixed;inset:0;
+    background:rgba(20,18,14,.55);
+    display:flex;align-items:center;justify-content:center;
+    z-index:50;
+    padding:20px;
+  }
+  .gameover-card{
+    background:var(--panel);
+    border:1px solid var(--brass);
+    border-radius:16px;
+    padding:30px 26px;
+    max-width:420px;
+    width:100%;
+    text-align:center;
+  }
+</style>
 </head>
 <body>
-    <h1>ChromaClash Disconnect Test</h1>
-    
-    <div>
-        <input type="text" id="roomInput" placeholder="Enter Room Code" value="ROOM1" />
-        <button id="joinBtn">Join Room</button>
+<div id="app"></div>
+
+<!-- Socket.IO Client Library -->
+<script src="/socket.io/socket.io.js"></script>
+
+<script>
+/* ===================== SOCKET & STATE ===================== */
+const socket = io();
+let currentRoom = "";
+let roomState = null;
+let errorMsg = "";
+let logs = [];
+
+/* ===================== SOCKET LISTENERS ===================== */
+socket.on("gameStateUpdate", (state) => {
+  roomState = state;
+  errorMsg = "";
+  render();
+});
+
+socket.on("moveRejected", (reason) => {
+  errorMsg = reason;
+  pushLog(`⚠️ ${reason}`);
+  render();
+});
+
+socket.on("playerDisconnected", (data) => {
+  pushLog(`🚨 Opponent (${data.disconnectedPlayerId.substring(0, 5)}...) disconnected.`);
+  render();
+});
+
+socket.on("gameOver", (data) => {
+  render();
+});
+
+/* ===================== ACTIONS ===================== */
+function joinRoom() {
+  const input = document.getElementById("roomCodeInput");
+  if (!input) return;
+  const code = input.value.trim().toUpperCase();
+  if (code) {
+    currentRoom = code;
+    socket.emit("joinRoom", currentRoom);
+    pushLog(`Joined room: ${currentRoom}`);
+  }
+}
+
+function playCard(cardName) {
+  if (!currentRoom) return;
+  errorMsg = "";
+  socket.emit("playCard", {
+    roomCode: currentRoom,
+    card: cardName
+  });
+}
+
+function pushLog(msg) {
+  logs.push(msg);
+  if (logs.length > 50) logs.shift();
+}
+
+/* ===================== RENDER FUNCTIONS ===================== */
+function renderStartScreen() {
+  document.getElementById('app').innerHTML = `
+    <h1 class="brand">Chroma Clash</h1>
+    <div class="tagline">Online Multiplayer Duel</div>
+    <div class="start-card">
+      <p>Enter a room code below to create or join a multiplayer game table with another player.</p>
+      <div style="margin: 20px 0;">
+        <input type="text" id="roomCodeInput" class="room-input" placeholder="ROOM CODE" value="ROOM1" />
+        <br>
+        <button class="go-btn" onclick="joinRoom()">Join Game Room</button>
+      </div>
+      <div class="rules">
+        <b>Multiplayer Rules:</b><br>
+        • Wait for 2 players to enter the same room code.<br>
+        • Turns alternate strictly between active players.<br>
+        • Playing out of turn will be rejected by the server.<br>
+        • First player to play 3 cards wins!
+      </div>
     </div>
+  `;
+}
 
-    <div id="gameArea" style="margin-top: 20px; display: none;">
-        <h2 id="turnBanner" style="color: darkblue;">Waiting for 2nd player...</h2>
-        <div id="scoreBanner" style="font-weight: bold; margin-bottom: 10px;"></div>
+function renderCard(cardName, isPlayable) {
+  const onclick = isPlayable ? `onclick="playCard('${cardName}')"` : '';
+  const style = isPlayable ? 'background:#B8860B; color:#fff;' : 'background:#f4f2ec; color:#2A2A28; opacity:0.6; cursor:not-allowed;';
+  
+  return `
+    <div class="card" style="${style}" ${onclick}>
+      <div class="corner">✦</div>
+      <div class="mid">${cardName}</div>
+      <div class="corner bottom">✦</div>
+    </div>
+  `;
+}
 
-        <div>
-            <h3>Server Discard Pile</h3>
-            <div id="discardPile" style="background: #f0f0f0; padding: 10px; border: 1px solid #ccc; min-height: 40px;">
-                <i>No cards played yet</i>
-            </div>
+function render() {
+  if (!roomState) {
+    renderStartScreen();
+    return;
+  }
+
+  const app = document.getElementById('app');
+  const isMyTurn = roomState.activePlayer === socket.id;
+  const isPlaying = roomState.status === "playing";
+
+  // Status Banner
+  let statusText = "";
+  if (roomState.status === "waiting") {
+    statusText = `Waiting for opponent... (${roomState.playerCount}/2 players)`;
+  } else if (roomState.status === "finished") {
+    statusText = roomState.winner === socket.id ? "🏆 YOU WIN!" : "💀 DEFEAT";
+  } else {
+    statusText = isMyTurn ? "⭐ YOUR TURN" : "⏳ OPPONENT'S TURN";
+  }
+
+  // Cards to choose from
+  const cards = ["Red Dragon", "Blue Shield", "Green Emerald", "Yellow Flash"];
+  const handHtml = cards.map(c => renderCard(c, isMyTurn && isPlaying)).join('');
+
+  // Discard Pile Rendering
+  const discardHtml = roomState.discardPile.length > 0
+    ? roomState.discardPile.map(item => `
+        <div style="padding: 4px 0; border-bottom: 1px solid var(--line);">
+          <b>Player ${item.playedBy.substring(0, 5)}...</b> played <b>${item.card}</b>
+        </div>
+      `).join('')
+    : '<div style="color:var(--ink-dim); font-style:italic;">No cards played yet</div>';
+
+  // Table Logs
+  const logHtml = logs.slice(-20).map(l => `<div>${l}</div>`).join('');
+
+  app.innerHTML = `
+    <h1 class="brand">Chroma Clash</h1>
+    <div class="tagline">Room: ${currentRoom}</div>
+    <div class="status-banner">${statusText}</div>
+
+    <div class="game-layout">
+      <div class="game-main">
+        
+        <!-- Center Discard Stage -->
+        <div class="center-stage">
+          <div style="width:100%;">
+            <div class="history-title" style="text-align:center;">Server Discard Pile</div>
+            <div id="discardArea" style="max-height: 120px; overflow-y: auto;">${discardHtml}</div>
+          </div>
         </div>
 
-        <div style="margin-top: 15px;">
-            <h3>Play a Card</h3>
-            <button class="playBtn" onclick="playCard('Red Dragon')">Play Red Dragon</button>
-            <button class="playBtn" onclick="playCard('Blue Shield')">Play Blue Shield</button>
+        <!-- Player Control Area -->
+        <div class="player-area">
+          <div class="player-head">
+            <div class="who">You (${socket.id ? socket.id.substring(0, 5) : ''}...)</div>
+            <div class="who" style="color:var(--brass);">Score: ${roomState.scores[socket.id] || 0}</div>
+          </div>
+
+          ${errorMsg ? `<div style="color:var(--danger); text-align:center; margin-bottom:10px; font-weight:bold;">⚠️ ${errorMsg}</div>` : ''}
+
+          <div class="prompt">${isPlaying ? (isMyTurn ? 'Select a card to play:' : 'Waiting for opponent to move...') : 'Game paused/waiting...'}</div>
+          
+          <div class="hand">${handHtml}</div>
         </div>
 
-        <div id="errorLog" style="color: red; margin-top: 15px; font-weight: bold;"></div>
+      </div>
+
+      <!-- Side Log Panel -->
+      <div class="game-side">
+        <div class="history-panel">
+          <div class="history-title">Table Activity</div>
+          <div class="log-panel">${logHtml}</div>
+        </div>
+      </div>
     </div>
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script>
-        const socket = io();
-        let currentRoom = "";
+    <!-- Game Over Modal -->
+    ${roomState.status === 'finished' ? `
+      <div class="overlay">
+        <div class="gameover-card">
+          <h2>${roomState.winner === socket.id ? '🎉 VICTORY!' : '💀 GAME OVER'}</h2>
+          <p style="color:var(--ink-dim);">${roomState.winner === socket.id ? 'You were the first to play 3 cards!' : 'Your opponent won the match.'}</p>
+          <button class="go-btn" onclick="location.reload()">Play Again</button>
+        </div>
+      </div>
+    ` : ''}
+  `;
+}
 
-        const joinBtn = document.getElementById("joinBtn");
-        const roomInput = document.getElementById("roomInput");
-        const gameArea = document.getElementById("gameArea");
-        const discardPileDiv = document.getElementById("discardPile");
-        const turnBanner = document.getElementById("turnBanner");
-        const scoreBanner = document.getElementById("scoreBanner");
-        const errorLog = document.getElementById("errorLog");
-
-        joinBtn.addEventListener("click", () => {
-            const roomCode = roomInput.value.trim();
-            if (roomCode) {
-                currentRoom = roomCode;
-                socket.emit("joinRoom", currentRoom);
-                gameArea.style.display = "block";
-            }
-        });
-
-        function playCard(cardName) {
-            errorLog.innerText = "";
-            socket.emit("playCard", {
-                roomCode: currentRoom,
-                card: cardName
-            });
-        }
-
-        socket.on("moveRejected", (reason) => {
-            errorLog.innerText = `⚠️ Action Denied: ${reason}`;
-        });
-
-        // Step 25: Handle player disconnect alert
-        socket.on("playerDisconnected", (data) => {
-            errorLog.innerText = `🚨 Opponent (${data.disconnectedPlayerId.substring(0, 5)}...) disconnected! Waiting for a new player...`;
-        });
-
-        socket.on("gameOver", (data) => {
-            const isMe = data.winnerId === socket.id;
-            turnBanner.innerText = isMe ? "🎉 VICTORY!" : "💀 DEFEAT!";
-            document.querySelectorAll(".playBtn").forEach(btn => btn.disabled = true);
-        });
-
-        socket.on("gameStateUpdate", (state) => {
-            if (state.status === "finished") return;
-
-            if (state.status === "waiting") {
-                turnBanner.innerText = `Waiting for 1 more player... (${state.playerCount}/2)`;
-                return;
-            }
-
-            let scoreText = "Scores: ";
-            for (let id in state.scores) {
-                scoreText += `[Player ${id.substring(0, 5)}...: ${state.scores[id]}] `;
-            }
-            scoreBanner.innerText = scoreText;
-
-            const isMyTurn = state.activePlayer === socket.id;
-            if (isMyTurn) {
-                turnBanner.innerText = "⭐ YOUR TURN!";
-                turnBanner.style.color = "green";
-            } else {
-                turnBanner.innerText = `⏳ Opponent's Turn...`;
-                turnBanner.style.color = "orange";
-            }
-
-            if (state.discardPile.length > 0) {
-                discardPileDiv.innerHTML = state.discardPile.map(item => 
-                    `<div><b>Player ${item.playedBy.substring(0, 5)}...</b> played <b>${item.card}</b></div>`
-                ).join("");
-            }
-        });
-    </script>
+renderStartScreen();
+</script>
 </body>
 </html>
