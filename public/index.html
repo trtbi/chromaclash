@@ -468,13 +468,22 @@ function emitAction(event, payload){
 /* ===================== ACTIONS (emit to server) ===================== */
 function joinRoom() {
   const input = document.getElementById("roomCodeInput");
-  if (!input) return;
-  const code = input.value.trim().toUpperCase();
-  if (code) {
-    currentRoom = code;
-    socket.emit("joinRoom", currentRoom);
-    pushLog(`Joined room: ${currentRoom}`);
+  if (!input) {
+    console.error("Room input field not found!");
+    return;
   }
+  
+  const code = input.value.trim().toUpperCase();
+  if (!code) {
+    alert("Please enter a valid room code!");
+    return;
+  }
+
+  currentRoom = code;
+  pushLog(`Joining room: ${currentRoom}...`);
+  
+  // Send socket request to server
+  socket.emit("joinRoom", currentRoom);
 }
 
 function beginChallengeAction(){ emitAction("chooseAction", { actionType: "challenge" }); }
