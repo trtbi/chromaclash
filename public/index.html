@@ -114,7 +114,7 @@
     line-height:1.65;
   }
   .start-card .rules b{color:var(--ink);}
-  
+   
   .visual-scenario {
     background: #fff;
     border-left: 4px solid var(--brass);
@@ -372,7 +372,7 @@
   }
   .log-panel div, .chat-log-panel div{padding:4px 0;border-bottom:1px dashed var(--line);}
   .log-panel div:last-child, .chat-log-panel div:last-child{color:var(--ink);font-weight:600;border-bottom:none;}
-  
+   
   /* Chat styles */
   .chat-panel {
     background:var(--panel);
@@ -576,6 +576,34 @@ function finalizeDefenseNumberWilds(){ emitAction("lockInDefense"); }
 function humanSwapSelectCard(cardId){ emitAction("swapSelectCard", { cardId }); }
 function humanSwapLockIn(){ emitAction("swapLockIn"); }
 function continueAfterReveal(){ emitAction("continueAfterReveal"); }
+
+/* ===================== NEW BACKGROUND NETWORK SCRIPTS ===================== */
+function sendRefreshAction() {
+  if (!currentRoom) return;
+  fetch('/api/game/refresh', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ roomCode: currentRoom, playerId: socket.id })
+  })
+  .then(res => {
+    if (!res.ok) console.error("Refresh action communication encountered a system error.");
+  })
+  .catch(err => console.error("Network connection failure during refresh transmission:", err));
+}
+
+function sendCommitOutcome() {
+  if (!currentRoom) return;
+  fetch('/api/game/commit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ roomCode: currentRoom, playerId: socket.id })
+  })
+  .then(res => {
+    if (!res.ok) console.error("Commit outcome action encountered a system error.");
+  })
+  .catch(err => console.error("Network connection failure during commit transmission:", err));
+}
+
 /* ===================== RENDER: CARDS & OPPONENTS ===================== */
 function renderCard(card, opts={}){
   opts = opts||{};
@@ -754,50 +782,76 @@ function renderControls(){
      if (socket.id !== ch.targetId) return '';
      return `<div class="btn-row"><button class="confirm-btn" onclick="finalizeDefenseNumberWilds()">Reveal</button></div>`;
   }
-  if(!isMyTurn()) return '';
+
+  /* ===================== UPDATED DYNAMIC CONTROLS REGION ===================== */
+  // Determine states based on current turn & game layout phase configuration
+  const myPlayer = roomState.players.find(p=>p.id===socket.id);
+  const isIdle = roomState.phase === 'choose-action';
+  
+  // Base turn conditions
+  const turnAllowed = isMyTurn() && roomState.status === 'playing';
+  const canSwap = myPlayer && !myPlayer.usedSwapLastTurn && me().hand.length>0;
+  const canPickup = myPlayer && !myPlayer.usedPickupLastTurn && roomState.drawCount>0;
+
+  // Toggle flags implemented based on requirements criteria
+  const mainActionsDisabled = !turnAllowed || !isIdle;
+  const workflowToolsDisabled = !turnAllowed || isIdle;
+
+  let utilityButtonsHtml = `
+    <div class="btn-row" style="margin-top: 14px; border-top: 1px dashed var(--line); padding-top: 12px; width: 100%;">
+      <button class="choice-btn" style="background-color: var(--panel-2); font-weight: 600;" ${workflowToolsDisabled ? 'disabled' : ''} onclick="sendRefreshAction()">🔄 Refresh (Undo Action)</button>
+      <button class="confirm-btn" style="background-color: var(--brass);" ${workflowToolsDisabled ? 'disabled' : ''} onclick="sendCommitOutcome()">🤝 Commit Outcome</button>
+    </div>
+  `;
+
+  if(!isMyTurn()) {
+    return `<div class="btn-row">` + utilityButtonsHtml + `</div>`;
+  }
+
   if(roomState.phase==='choose-action'){
-    const myPlayer = roomState.players.find(p=>p.id===socket.id);
-    const canSwap = myPlayer && !myPlayer.usedSwapLastTurn && me().hand.length>0;
-    const canPickup = myPlayer && !myPlayer.usedPickupLastTurn && roomState.drawCount>0;
     return `<div class="btn-row">
-      <button class="choice-btn" onclick="beginChallengeAction()">⚔️ Challenge a Player</button>
-      <button class="choice-btn" ${canSwap?'':'disabled'} title="${canSwap?'':'Swap was used last turn'}" onclick="humanSwapBegin()">🔄 Swap Cards</button>
-      <button class="choice-btn" ${canPickup?'':'disabled'} title="${canPickup?'':'Pick-up was used last turn, or the pile is empty'}" onclick="humanPickUp()">📥 Pick Up Extra Card</button>
+      <button class="choice-btn" ${mainActionsDisabled?'disabled':''} onclick="beginChallengeAction()">⚔️ Challenge a Player</button>
+      <button class="choice-btn" ${ (mainActionsDisabled || !canSwap)?'disabled':'' } title="${canSwap?'':'Swap was used last turn'}" onclick="humanSwapBegin()">🔄 Swap Cards</button>
+      <button class="choice-btn" ${ (mainActionsDisabled || !canPickup)?'disabled':'' } title="${canPickup?'':'Pick-up was used last turn, or the pile is empty'}" onclick="humanPickUp()">📥 Pick Up Extra Card</button>
+      ${utilityButtonsHtml}
     </div>`;
   }
   if(roomState.phase==='swap-choose-card'){
     return `<div class="btn-row">
       <button class="confirm-btn" ${roomState.swap.myCardId? '':'disabled'} onclick="humanSwapLockIn()">Lock In Swap</button>
+      ${utilityButtonsHtml}
     </div>`;
   }
   if(roomState.phase==='choose-type'){
     return `<div class="btn-row">
       <button class="choice-btn" onclick="humanChooseType('color')">Call a Color</button>
       <button class="choice-btn" onclick="humanChooseType('number')">Call a Number</button>
+      ${utilityButtonsHtml}
     </div>`;
   }
   if(roomState.phase==='choose-value'){
     if(ch.type==='color'){
       const swatches = COLORS.map(c=>`<button class="swatch-btn" style="background:${c.hex};color:${c.text};"
         onclick="humanChooseValue('${c.key}')">${c.label[0]}</button>`).join('');
-      return `<div class="btn-row">${swatches}</div>`;
+      return `<div class="btn-row">${swatches} ${utilityButtonsHtml}</div>`;
     } else {
       const counts={};
       me().hand.forEach(c=>{ counts[c.num]=(counts[c.num]||0)+1; });
       const nums = Array.from({length:10},(_,n)=>`<button class="num-btn" onclick="humanChooseValue(${n})">${n}<span class="ct">${counts[n]||0}x</span></button>`).join('');
-      return `<div class="btn-row">${nums}</div>`;
+      return `<div class="btn-row">${nums} ${utilityButtonsHtml}</div>`;
     }
   }
   if(roomState.phase==='choose-card'){
     if(ch.type==='number'){
-      return `<div class="btn-row"><button class="confirm-btn" onclick="humanLockIn()">Lock In</button></div>`;
+      return `<div class="btn-row"><button class="confirm-btn" onclick="humanLockIn()">Lock In</button> ${utilityButtonsHtml}</div>`;
     }
     return `<div class="btn-row">
       <button class="confirm-btn" ${ch.selectedCardId? '':'disabled'} onclick="humanLockIn()">Lock In</button>
+      ${utilityButtonsHtml}
     </div>`;
   }
   if(roomState.phase==='reveal'){
-    return `<div class="btn-row"><button class="confirm-btn" onclick="continueAfterReveal()">Continue</button></div>`;
+    return `<div class="btn-row"><button class="confirm-btn" onclick="continueAfterReveal()">Continue</button> ${utilityButtonsHtml}</div>`;
   }
   return '';
 }

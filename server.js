@@ -6,6 +6,8 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+// Required middleware to parse JSON bodies for the new API endpoint
+app.use(express.json());
 app.use(express.static("public"));
 
 const rooms = {};
@@ -24,7 +26,6 @@ function buildDeck() {
     const deck = [];
     COLORS.forEach((c) => {
         for (let n = 0; n <= 9; n++) {
-            // Added a short random suffix to guarantee unique IDs, preventing bugs during hand filtering
             const uniqueId = `${c.key}-${n}-${Math.random().toString(36).substring(2, 6)}`;
             deck.push({ id: uniqueId, color: c.key, num: n });
         }
@@ -57,7 +58,8 @@ function createGameState(roomCode) {
         winner: null,
         log: ["Room created. Waiting for up to 4 players..."],
         chat: [], 
-        lastSnapshot: null 
+        lastSnapshot: null,
+        checkpointState: null // 1. TOP-LEVEL ROOM CHECKPOINT VARIABLE INITIALIZED
     };
 }
 
@@ -67,7 +69,8 @@ function pushLog(room, msg) {
 }
 
 function snapshotRoom(room) {
-    room.lastSnapshot = JSON.parse(
+    // 2. PRE-ACTION SNAPSHOT LAYER (Deep copy values prior to mutation)
+    const snapshotData = JSON.parse(
         JSON.stringify({
             status: room.status,
             draw: room.draw,
@@ -82,6 +85,9 @@ function snapshotRoom(room) {
             log: room.log
         })
     );
+    
+    room.lastSnapshot = snapshotData;
+    room.checkpointState = snapshotData; // Store a dedicated version in our holding zone
 }
 
 function getPublicStateForPlayer(room, playerId) {
@@ -278,6 +284,43 @@ function resolveChallenge(room) {
     broadcastState(room);
 }
 
+// 3. BUILD THE ROLLBACK API ENDPOINT 
+app.post("/api/action/refresh", (req, res) => {
+    const { roomCode } = req.body;
+    
+    if (!roomCode || !rooms[roomCode]) {
+        return res.status(404).json({ error: "Active game room code not found." });
+    }
+
+    const room = rooms[roomCode];
+
+    if (!room.checkpointState) {
+        return res.status(400).json({ error: "No checkpoint data available to revert." });
+    }
+
+    // Rewind game data state back to live variables
+    const snap = room.checkpointState;
+    room.status = snap.status;
+    room.draw = snap.draw;
+    room.discard = snap.discard;
+    room.players = snap.players;
+    room.activeTurnIndex = snap.activeTurnIndex;
+    room.phase = snap.phase;
+    room.challenge = snap.challenge;
+    room.swap = snap.swap;
+    room.reveal = snap.reveal;
+    room.winner = snap.winner;
+    room.log = snap.log;
+
+    // 4. CLEAR THE HOLDING ZONE
+    room.checkpointState = null;
+
+    pushLog(room, "Game state rewound back via HTTP Rollback Endpoint API.");
+    broadcastState(room);
+
+    return res.json({ success: true, message: "Game state rolled back successfully." });
+});
+
 io.on("connection", (socket) => {
     console.log("Player connected:", socket.id);
 
@@ -286,7 +329,7 @@ io.on("connection", (socket) => {
         const customName = typeof data === 'object' ? data.name : null;
         
         socket.join(roomCode);
-        socket.data.currentRoom = roomCode; // Using standardized socket.data store
+        socket.data.currentRoom = roomCode;
 
         if (!rooms[roomCode]) {
             rooms[roomCode] = createGameState(roomCode);
@@ -294,7 +337,6 @@ io.on("connection", (socket) => {
         const room = rooms[roomCode];
         const trimmedName = (customName && customName.trim().length > 0) ? customName.trim() : null;
 
-        // Reconnection Handshake Logic
         if (trimmedName) {
             const existingPlayer = room.players.find(p => p.name.toLowerCase() === trimmedName.toLowerCase());
             if (existingPlayer) {
@@ -308,7 +350,6 @@ io.on("connection", (socket) => {
         const playerNum = room.players.length + room.spectators.length + 1;
         const playerName = trimmedName || `Player ${playerNum}`;
 
-        // Spectator Isolation Rule logic
         if (room.status !== "waiting") {
             room.spectators.push({ id: socket.id, name: playerName });
             pushLog(room, `${playerName} joined as a spectator.`);
@@ -316,7 +357,6 @@ io.on("connection", (socket) => {
             return;
         }
 
-        // 4-Player Room Limit Check
         if (!room.players.some((p) => p.id === socket.id)) {
             if (room.players.length >= 4) {
                 room.spectators.push({ id: socket.id, name: playerName });
@@ -595,7 +635,7 @@ io.on("connection", (socket) => {
 
     socket.on("disconnect", () => {
         console.log("Player disconnected:", socket.id);
-        const roomCode = socket.data.currentRoom; // Safely reading from socket.data
+        const roomCode = socket.data.currentRoom;
         if (!roomCode || !rooms[roomCode]) return;
         const room = rooms[roomCode];
         
