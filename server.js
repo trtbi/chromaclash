@@ -1,10 +1,13 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
+
 app.use(express.static("public"));
+
 const rooms = {};
 const COLORS = [
     { key: "red", label: "Red" },
@@ -16,15 +19,19 @@ const COLORS = [
     { key: "black", label: "Black" },
     { key: "teal", label: "Teal" }
 ];
+
 function buildDeck() {
     const deck = [];
     COLORS.forEach((c) => {
         for (let n = 0; n <= 9; n++) {
-            deck.push({ id: `${c.key}-${n}`, color: c.key, num: n });
+            // Added a short random suffix to guarantee unique IDs, preventing bugs during hand filtering
+            const uniqueId = `${c.key}-${n}-${Math.random().toString(36).substring(2, 6)}`;
+            deck.push({ id: uniqueId, color: c.key, num: n });
         }
     });
     return shuffle(deck);
 }
+
 function shuffle(arr) {
     for (let i = arr.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -32,6 +39,7 @@ function shuffle(arr) {
     }
     return arr;
 }
+
 function createGameState(roomCode) {
     return {
         roomCode,
@@ -39,8 +47,8 @@ function createGameState(roomCode) {
         draw: buildDeck(),
         discard: [],
         players: [], // { id, name, hand: [], score, usedSwapLastTurn, usedPickupLastTurn }
-        spectators: [], // { id, name } -> Handles extra joins gracefully[cite: 2]
-        participatingCount: 0, // Records active structural count at the start of the match
+        spectators: [], // { id, name }
+        participatingCount: 0, 
         activeTurnIndex: 0,
         phase: "turn-start",
         challenge: null,
@@ -48,17 +56,17 @@ function createGameState(roomCode) {
         reveal: null,
         winner: null,
         log: ["Room created. Waiting for up to 4 players..."],
-        chat: [], // Dynamic chat room state history clearing on game cycles
-        lastSnapshot: null // Holds a copy of state right before the most recent action, for undo
+        chat: [], 
+        lastSnapshot: null 
     };
 }
+
 function pushLog(room, msg) {
-    // Newest entries go to the front so the client can display log[0] as most recent
     room.log.unshift(msg);
     if (room.log.length > 50) room.log.pop();
 }
+
 function snapshotRoom(room) {
-    // Deep-clones everything an action could change, so a single undo step can restore it
     room.lastSnapshot = JSON.parse(
         JSON.stringify({
             status: room.status,
@@ -75,6 +83,7 @@ function snapshotRoom(room) {
         })
     );
 }
+
 function getPublicStateForPlayer(room, playerId) {
     const activePlayer = room.players[room.activeTurnIndex]
         ? room.players[room.activeTurnIndex].id
@@ -113,28 +122,22 @@ function getPublicStateForPlayer(room, playerId) {
         chat: room.chat
     };
 }
+
 function broadcastState(room) {
-    // Broadcast updates targeting active players[cite: 2]
     room.players.forEach((p) => {
         const playerSocket = io.sockets.sockets.get(p.id);
         if (playerSocket) {
-            playerSocket.emit(
-                "gameStateUpdate",
-                getPublicStateForPlayer(room, p.id)
-            );
+            playerSocket.emit("gameStateUpdate", getPublicStateForPlayer(room, p.id));
         }
     });
-    // Broadcast match flow transparently to spectators[cite: 2]
     room.spectators.forEach((s) => {
         const specSocket = io.sockets.sockets.get(s.id);
         if (specSocket) {
-            specSocket.emit(
-                "gameStateUpdate",
-                getPublicStateForPlayer(room, s.id)
-            );
+            specSocket.emit("gameStateUpdate", getPublicStateForPlayer(room, s.id));
         }
     });
 }
+
 function startTurn(room) {
     if (room.draw.length === 0) {
         endGame(room);
@@ -143,13 +146,11 @@ function startTurn(room) {
     const player = room.players[room.activeTurnIndex];
     const card = room.draw.pop();
     player.hand.push(card);
-    pushLog(
-        room,
-        `${player.name} drew a card. (${room.draw.length} left in pile)`
-    );
+    pushLog(room, `${player.name} drew a card. (${room.draw.length} left in pile)`);
     room.phase = "choose-action";
     broadcastState(room);
 }
+
 function finishTurn(room, actionTaken) {
     const activePlayer = room.players[room.activeTurnIndex];
     if(activePlayer) {
@@ -166,6 +167,7 @@ function finishTurn(room, actionTaken) {
     room.phase = "turn-start";
     startTurn(room);
 }
+
 function refillIfEmpty(room, player) {
     if (player.hand.length === 0 && room.draw.length >= 10) {
         const n = Math.min(5, room.draw.length);
@@ -173,18 +175,17 @@ function refillIfEmpty(room, player) {
         pushLog(room, `${player.name}'s hand hit zero — draws 5 fresh cards!`);
     }
 }
+
 function endGame(room) {
     room.status = "finished";
     room.phase = "gameover";
     const sorted = [...room.players].sort((a, b) => b.score - a.score);
     room.winner = sorted[0] ? sorted[0].id : null;
-    pushLog(
-        room,
-        `Game Over! Winner: ${sorted[0] ? sorted[0].name : "Nobody"}`
-    );
+    pushLog(room, `Game Over! Winner: ${sorted[0] ? sorted[0].name : "Nobody"}`);
     broadcastState(room);
     io.to(room.roomCode).emit("gameOver", { winnerId: room.winner });
 }
+
 function resolveChallenge(room) {
     const ch = room.challenge;
     const challenger = room.players.find((p) => p.id === ch.challengerId);
@@ -212,6 +213,7 @@ function resolveChallenge(room) {
         else if (tCount > cCount) winner = "target";
         else winner = null; 
     }
+
     let scoreGain = 0;
     let challengerPenalized = false;
     if (ch.type === "color") {
@@ -236,30 +238,33 @@ function resolveChallenge(room) {
             challengerPenalized = true;
         }
     }
+
     const cIds = new Set(ch.challengerCards.map((c) => c.id));
     const tIds = new Set(ch.targetCards.map((c) => c.id));
     challenger.hand = challenger.hand.filter((c) => !cIds.has(c.id));
     target.hand = target.hand.filter((c) => !tIds.has(c.id));
     room.discard.push(...ch.challengerCards, ...ch.targetCards);
+
     refillIfEmpty(room, challenger);
     refillIfEmpty(room, target);
+
     const winnerName =
         winner === "challenger"
             ? challenger.name
             : winner === "target"
             ? target.name
             : null;
+
     if (winner) {
         pushLog(room, `${winnerName} won the duel! +${scoreGain} pts.`);
     } else {
         pushLog(room, "It's a tie — no points awarded.");
     }
+
     if (challengerPenalized) {
-        pushLog(
-            room,
-            `${challenger.name} loses 15 pts for the failed number call.`
-        );
+        pushLog(room, `${challenger.name} loses 15 pts for the failed number call.`);
     }
+
     room.reveal = {
         challengerId: ch.challengerId,
         targetId: ch.targetId,
@@ -272,20 +277,36 @@ function resolveChallenge(room) {
     room.phase = "reveal";
     broadcastState(room);
 }
+
 io.on("connection", (socket) => {
     console.log("Player connected:", socket.id);
+
     socket.on("joinRoom", (data) => {
         const roomCode = typeof data === 'object' ? data.roomCode : data;
         const customName = typeof data === 'object' ? data.name : null;
+        
         socket.join(roomCode);
-        socket.currentRoom = roomCode;
+        socket.data.currentRoom = roomCode; // Using standardized socket.data store
+
         if (!rooms[roomCode]) {
             rooms[roomCode] = createGameState(roomCode);
         }
         const room = rooms[roomCode];
-        
+        const trimmedName = (customName && customName.trim().length > 0) ? customName.trim() : null;
+
+        // Reconnection Handshake Logic
+        if (trimmedName) {
+            const existingPlayer = room.players.find(p => p.name.toLowerCase() === trimmedName.toLowerCase());
+            if (existingPlayer) {
+                existingPlayer.id = socket.id; 
+                pushLog(room, `${existingPlayer.name} reconnected successfully.`);
+                broadcastState(room);
+                return;
+            }
+        }
+
         const playerNum = room.players.length + room.spectators.length + 1;
-        const playerName = (customName && customName.trim().length > 0) ? customName.trim() : `Player ${playerNum}`;
+        const playerName = trimmedName || `Player ${playerNum}`;
 
         // Spectator Isolation Rule logic
         if (room.status !== "waiting") {
@@ -324,11 +345,10 @@ io.on("connection", (socket) => {
         const room = rooms[roomCode];
         if (!room || room.status !== "waiting") return;
         
-        // Ensure host initialization safety guard check
         if (room.players.length >= 2) {
             room.status = "playing";
-            room.participatingCount = room.players.length; // Explicitly mark absolute participating volume
-            room.chat = []; // Reset player chat box contents completely right before the game begins
+            room.participatingCount = room.players.length; 
+            room.chat = []; 
             pushLog(room, `Match started manually with ${room.participatingCount} active players!`);
             startTurn(room);
         }
@@ -369,6 +389,7 @@ io.on("connection", (socket) => {
         }
         broadcastState(room);
     });
+
     socket.on("chooseTarget", (data) => {
         const { roomCode, targetId } = data;
         const room = rooms[roomCode];
@@ -378,6 +399,7 @@ io.on("connection", (socket) => {
         room.phase = "choose-type";
         broadcastState(room);
     });
+
     socket.on("chooseChallengeType", (data) => {
         const { roomCode, challengeType } = data;
         const room = rooms[roomCode];
@@ -387,6 +409,7 @@ io.on("connection", (socket) => {
         room.phase = "choose-value";
         broadcastState(room);
     });
+
     socket.on("chooseChallengeValue", (data) => {
         const { roomCode, value } = data;
         const room = rooms[roomCode];
@@ -403,6 +426,7 @@ io.on("connection", (socket) => {
         room.phase = "choose-card";
         broadcastState(room);
     });
+
     socket.on("selectCard", (data) => {
         const { roomCode, cardId } = data;
         const room = rooms[roomCode];
@@ -411,6 +435,7 @@ io.on("connection", (socket) => {
         room.challenge.selectedCardId = cardId;
         broadcastState(room);
     });
+
     socket.on("lockInChallenge", (data) => {
         const { roomCode } = data;
         const room = rooms[roomCode];
@@ -420,17 +445,13 @@ io.on("connection", (socket) => {
         const challenger = room.players.find((p) => p.id === ch.challengerId);
         const target = room.players.find((p) => p.id === ch.targetId);
         if (ch.type === "color") {
-            const card = challenger.hand.find(
-                (c) => c.id === ch.selectedCardId
-            );
+            const card = challenger.hand.find((c) => c.id === ch.selectedCardId);
             ch.challengerCards = [card];
         }
         pushLog(
             room,
             `${challenger.name} challenged ${target.name} — calling ${
-                ch.type === "color"
-                    ? `${ch.value.toUpperCase()} as trump color.`
-                    : `Number ${ch.value} as trump.`
+                ch.type === "color" ? `${ch.value.toUpperCase()} as trump color.` : `Number ${ch.value} as trump.`
             }`
         );
         if (target.hand.length === 0) {
@@ -441,9 +462,7 @@ io.on("connection", (socket) => {
         if (ch.type === "color") {
             room.phase = "awaiting-human-defense";
         } else {
-            ch.targetCards = target.hand.filter(
-                (c) => c.num === ch.value
-            );
+            ch.targetCards = target.hand.filter((c) => c.num === ch.value);
             if (ch.targetCards.length !== ch.challengerCards.length) {
                 pushLog(room, `${target.name} lacks matching cards to stand up to the challenge baseline! Auto-resolving match.`);
             }
@@ -454,6 +473,7 @@ io.on("connection", (socket) => {
         }
         broadcastState(room);
     });
+
     socket.on("defendCard", (data) => {
         const { roomCode, cardId } = data;
         const room = rooms[roomCode];
@@ -467,6 +487,7 @@ io.on("connection", (socket) => {
         broadcastState(room);
         setTimeout(() => resolveChallenge(room), 600);
     });
+
     socket.on("lockInDefense", (data) => {
         const { roomCode } = data;
         const room = rooms[roomCode];
@@ -481,6 +502,7 @@ io.on("connection", (socket) => {
         broadcastState(room);
         setTimeout(() => resolveChallenge(room), 600);
     });
+
     socket.on("swapChooseTarget", (data) => {
         const { roomCode, targetId } = data;
         const room = rooms[roomCode];
@@ -490,6 +512,7 @@ io.on("connection", (socket) => {
         room.phase = "swap-choose-card";
         broadcastState(room);
     });
+
     socket.on("swapSelectCard", (data) => {
         const { roomCode, cardId } = data;
         const room = rooms[roomCode];
@@ -498,6 +521,7 @@ io.on("connection", (socket) => {
         room.swap.myCardId = cardId;
         broadcastState(room);
     });
+
     socket.on("swapLockIn", (data) => {
         const { roomCode } = data;
         const room = rooms[roomCode];
@@ -512,8 +536,7 @@ io.on("connection", (socket) => {
             finishTurn(room, "swap");
             return;
         }
-        const theirCard =
-            target.hand[Math.floor(Math.random() * target.hand.length)];
+        const theirCard = target.hand[Math.floor(Math.random() * target.hand.length)];
         me.hand = me.hand.filter((c) => c.id !== myCard.id);
         target.hand = target.hand.filter((c) => c.id !== theirCard.id);
         me.hand.push(theirCard);
@@ -521,6 +544,7 @@ io.on("connection", (socket) => {
         pushLog(room, `${me.name} swapped a card with ${target.name}.`);
         finishTurn(room, "swap");
     });
+
     socket.on("pickUp", (data) => {
         const { roomCode } = data;
         const room = rooms[roomCode];
@@ -530,13 +554,11 @@ io.on("connection", (socket) => {
         if (room.draw.length > 0) {
             const card = room.draw.pop();
             me.hand.push(card);
-            pushLog(
-                room,
-                `${me.name} picked up an extra card. (${room.draw.length} left in pile)`
-            );
+            pushLog(room, `${me.name} picked up an extra card. (${room.draw.length} left in pile)`);
         }
         finishTurn(room, "pickup");
     });
+
     socket.on("continueAfterReveal", (data) => {
         const { roomCode } = data;
         const room = rooms[roomCode];
@@ -545,6 +567,7 @@ io.on("connection", (socket) => {
         room.reveal = null;
         finishTurn(room, "challenge");
     });
+
     socket.on("undoLastAction", (data) => {
         const { roomCode } = data;
         const room = rooms[roomCode];
@@ -569,9 +592,10 @@ io.on("connection", (socket) => {
         pushLog(room, "Last action was undone.");
         broadcastState(room);
     });
+
     socket.on("disconnect", () => {
         console.log("Player disconnected:", socket.id);
-        const roomCode = socket.currentRoom;
+        const roomCode = socket.data.currentRoom; // Safely reading from socket.data
         if (!roomCode || !rooms[roomCode]) return;
         const room = rooms[roomCode];
         
@@ -600,6 +624,7 @@ io.on("connection", (socket) => {
         }
     });
 });
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`ChromaClash server running on port ${PORT}`);
