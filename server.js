@@ -200,7 +200,7 @@ function resolveChallenge(room) {
         const tCount = ch.targetCards.length;
         if (cCount > tCount) winner = "challenger";
         else if (tCount > cCount) winner = "target";
-        else winner = null;
+        else winner = null; // Tie breaker if identical counts match
     }
 
     let scoreGain = 0;
@@ -273,7 +273,11 @@ function resolveChallenge(room) {
 io.on("connection", (socket) => {
     console.log("Player connected:", socket.id);
 
-    socket.on("joinRoom", (roomCode) => {
+    socket.on("joinRoom", (data) => {
+        // Support custom names object structure or raw code fallback string
+        const roomCode = typeof data === 'object' ? data.roomCode : data;
+        const customName = typeof data === 'object' ? data.name : null;
+
         socket.join(roomCode);
         socket.currentRoom = roomCode;
 
@@ -285,6 +289,7 @@ io.on("connection", (socket) => {
 
         if (!room.players.some((p) => p.id === socket.id)) {
             const playerNum = room.players.length + 1;
+            const playerName = (customName && customName.trim().length > 0) ? customName.trim() : `Player ${playerNum}`;
             const initialHand = [];
             for (let i = 0; i < 10; i++) {
                 if (room.draw.length > 0) initialHand.push(room.draw.pop());
@@ -292,13 +297,13 @@ io.on("connection", (socket) => {
 
             room.players.push({
                 id: socket.id,
-                name: `Player ${playerNum}`,
+                name: playerName,
                 hand: initialHand,
                 score: 0,
                 usedSwapLastTurn: false,
                 usedPickupLastTurn: false
             });
-            pushLog(room, `Player ${playerNum} joined the room.`);
+            pushLog(room, `${playerName} joined the room.`);
         }
 
         if (room.players.length >= 2 && room.status === "waiting") {
@@ -404,6 +409,7 @@ io.on("connection", (socket) => {
         if (card && card.wild && card.color == null) {
             room.wildAssign = {
                 role: "challenger-card",
+                ownerId: socket.id, // Explicitly tracking action operator identity 
                 cardId,
                 needNumber: true,
                 color: null,
@@ -448,6 +454,16 @@ io.on("connection", (socket) => {
                 }
             ];
             room.wildAssign = null;
+            
+            // Enforce Match Count Check: If defender played a lone wild card inside a number challenge context
+            if (ch.type === "number" && ch.targetCards.length !== ch.challengerCards.length) {
+                 socket.emit("moveRejected", `Mandatory Mechanic Violation: You must play exactly ${ch.challengerCards.length} cards!`);
+                 ch.targetCards = [];
+                 room.phase = "defense-number-wild-choice";
+                 broadcastState(room);
+                 return;
+            }
+
             room.phase = "revealing";
             broadcastState(room);
             setTimeout(() => resolveChallenge(room), 600);
@@ -464,7 +480,7 @@ io.on("connection", (socket) => {
             ch.pendingWilds = ch.pendingWilds.filter((id) => id !== cardId);
             room.wildAssign = null;
             room.phase = "choose-card";
-        } else if (wa.role === "defense-number-wild") {
+        } else if (wa.role === "defense-number-wild-choice" || wa.role === "defense-number-wild") {
             const player = room.players.find((p) => p.id === ch.targetId);
             const raw = player.hand.find((c) => c.id === cardId);
             ch.targetCards.push({
@@ -489,6 +505,7 @@ io.on("connection", (socket) => {
 
         room.wildAssign = {
             role: "challenger-number-wild",
+            ownerId: socket.id,
             cardId,
             needNumber: false,
             color: null,
@@ -520,7 +537,7 @@ io.on("connection", (socket) => {
             room,
             `${challenger.name} challenged ${target.name} — calling ${
                 ch.type === "color"
-                    ? `${ch.value} as trump color.`
+                    ? `${ch.value.toUpperCase()} as trump color.`
                     : `Number ${ch.value} as trump.`
             }`
         );
@@ -534,15 +551,22 @@ io.on("connection", (socket) => {
         if (ch.type === "color") {
             room.phase = "awaiting-human-defense";
         } else {
+            // Number challenge initialization setup
             const naturalMatches = target.hand.filter(
                 (c) => !c.wild && c.num === ch.value
             );
             const wilds = target.hand.filter((c) => c.wild);
             ch.targetCards = naturalMatches;
+            
             if (wilds.length > 0) {
                 ch.pendingDefenseWilds = wilds.map((w) => w.id);
                 room.phase = "defense-number-wild-choice";
             } else {
+                // If no wilds are present, validate if target matching count directly equals challenger count
+                if (ch.targetCards.length !== ch.challengerCards.length) {
+                    // Introduce mechanic override enforcement rule: Forced to match count parameters no matter what
+                    pushLog(room, `${target.name} lacks matching cards to stand up to the challenge baseline! Auto-resolving match.`);
+                }
                 room.phase = "revealing";
                 broadcastState(room);
                 setTimeout(() => resolveChallenge(room), 600);
@@ -564,6 +588,7 @@ io.on("connection", (socket) => {
         if (card && card.wild && card.color == null) {
             room.wildAssign = {
                 role: "defense-card",
+                ownerId: target.id, // Explicitly identify that the defender is choosing values
                 cardId,
                 needNumber: true,
                 color: null,
@@ -585,8 +610,10 @@ io.on("connection", (socket) => {
         const room = rooms[roomCode];
         if (!room || !room.challenge) return;
 
+        const ch = room.challenge;
         room.wildAssign = {
             role: "defense-number-wild",
+            ownerId: ch.targetId, // Explicitly pass identity ownership tracking parameter mapping properties
             cardId,
             needNumber: false,
             color: null,
@@ -599,7 +626,16 @@ io.on("connection", (socket) => {
     socket.on("lockInDefense", (data) => {
         const { roomCode } = data;
         const room = rooms[roomCode];
-        if (!room) return;
+        if (!room || !room.challenge) return;
+
+        const ch = room.challenge;
+        const target = room.players.find((p) => p.id === ch.targetId);
+
+        // Enforce rule alignment restriction checkpoint guard: Target must exactly match the length count parameter
+        if (ch.type === "number" && ch.targetCards.length !== ch.challengerCards.length) {
+            socket.emit("moveRejected", `Mandatory Mechanic Violation: You must match the exact count (${ch.challengerCards.length} cards) played by your challenger!`);
+            return;
+        }
 
         room.phase = "revealing";
         broadcastState(room);
@@ -685,10 +721,14 @@ io.on("connection", (socket) => {
         if (!roomCode || !rooms[roomCode]) return;
 
         const room = rooms[roomCode];
+        const leavingPlayer = room.players.find((p) => p.id === socket.id);
+        const leavingName = leavingPlayer ? leavingPlayer.name : socket.id.substring(0, 5);
+
         room.players = room.players.filter((p) => p.id !== socket.id);
 
         io.to(roomCode).emit("playerDisconnected", {
-            disconnectedPlayerId: socket.id
+            disconnectedPlayerId: socket.id,
+            name: leavingName
         });
 
         if (room.players.length < 2 && room.status === "playing") {
@@ -696,7 +736,7 @@ io.on("connection", (socket) => {
             room.phase = "turn-start";
             pushLog(
                 room,
-                `Player disconnected. Pausing match until another joins...`
+                `Player ${leavingName} disconnected. Pausing match until another joins...`
             );
         }
 
