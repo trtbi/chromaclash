@@ -80,7 +80,6 @@
     letter-spacing:.01em;
     box-shadow:0 2px 10px rgba(0,0,0,.04);
   }
-
   /* ---- Start screen ---- */
   .start-card{
     background:var(--panel);
@@ -124,7 +123,6 @@
     font-size: 12.5px;
     border-radius: 0 6px 6px 0;
   }
-
   .room-input{
     width: 100%;
     max-width: 280px;
@@ -158,7 +156,6 @@
     letter-spacing:0.03em;
   }
   .go-btn:hover{background:var(--brass-soft);}
-
   /* ---- Table layout ---- */
   .game-layout{display:flex;gap:16px;align-items:flex-start;}
   .game-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:14px;}
@@ -167,7 +164,6 @@
     .game-layout{flex-direction:column;}
     .game-side{width:100%;}
   }
-
   .opponents{
     display:grid;
     grid-template-columns:repeat(auto-fit, minmax(120px,1fr));
@@ -197,7 +193,6 @@
     margin-left:-10px;
   }
   .cardback:first-child{margin-left:0;}
-
   .center-stage{
     background:radial-gradient(ellipse at center, #ffffff 0%, #f6f4ee 65%, transparent 100%);
     border:1px solid var(--line);
@@ -233,7 +228,6 @@
     gap:18px;
   }
   .idle-msg{color:var(--ink-dim);font-size:13px;text-align:center;font-style:italic;}
-
   /* Trump plaque */
   .trump-plaque{
     display:flex;flex-direction:column;align-items:center;gap:6px;
@@ -249,12 +243,10 @@
     box-shadow:0 0 22px rgba(201,162,39,.25);
   }
   .trump-badge.number-badge{background:var(--panel-2);color:var(--brass);}
-
   .duel-cards{display:flex;align-items:center;gap:14px;}
   .duel-side{display:flex;flex-direction:column;align-items:center;gap:6px;}
   .duel-side .who{font-size:11px;color:var(--ink-dim);text-transform:uppercase;letter-spacing:.05em;}
   .duel-vs{font-family:var(--font-display);color:var(--brass);font-size:14px;}
-
   .card{
     width:64px;height:92px;
     border-radius:8px;
@@ -288,7 +280,6 @@
   }
   .card.wild-card .mid{font-size:10.5px;letter-spacing:.04em;}
   .card .wild-marker{position:absolute;top:2px;right:4px;font-size:10px;color:#FFD60A;text-shadow:0 0 3px rgba(0,0,0,.6);}
-
   /* Player area */
   .player-area{
     background:var(--panel);
@@ -300,7 +291,6 @@
   .player-head .who{font-weight:700;font-size:14px;}
   .player-head .sc{font-family:var(--font-display);font-size:22px;color:var(--brass);}
   .hand{display:flex;gap:8px;flex-wrap:wrap;min-height:96px;}
-
   .prompt{
     text-align:center;
     font-size:13.5px;
@@ -360,30 +350,65 @@
     font-size:13.5px;
   }
   .confirm-btn:disabled{opacity:.35;cursor:default;}
-
   .history-panel{
     background:var(--panel);
     border:1px solid var(--line);
     border-radius:12px;
-    padding:14px 14px;
+    padding:0px;
+    overflow: hidden;
   }
-  .history-title{
+  .history-panel summary, .chat-panel summary{
     font-weight:700;
     font-size:11.5px;
     letter-spacing:.1em;
     text-transform:uppercase;
     color:var(--ink-dim);
-    margin-bottom:10px;
+    padding:14px;
+    cursor:pointer;
+    outline:none;
+    user-select:none;
   }
-  .log-panel{
-    max-height:300px;
+  .log-panel, .chat-log-panel{
+    max-height:220px;
     overflow-y:auto;
     font-size:12px;
     color:var(--ink-dim);
     line-height:1.7;
+    padding:0 14px 14px 14px;
   }
-  .log-panel div{padding:4px 0;border-bottom:1px dashed var(--line);}
-  .log-panel div:last-child{color:var(--ink);font-weight:600;border-bottom:none;}
+  .log-panel div, .chat-log-panel div{padding:4px 0;border-bottom:1px dashed var(--line);}
+  .log-panel div:last-child, .chat-log-panel div:last-child{color:var(--ink);font-weight:600;border-bottom:none;}
+  
+  /* Chat styles */
+  .chat-panel {
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:0px;
+    overflow: hidden;
+  }
+  .chat-input-row {
+    display:flex;
+    border-top:1px solid var(--line);
+  }
+  .chat-input-row input {
+    flex:1;
+    border:none;
+    padding:10px 12px;
+    font-size:12px;
+    outline:none;
+    background:transparent;
+  }
+  .chat-input-row button {
+    background:var(--brass);
+    color:#fff;
+    border:none;
+    padding:0 14px;
+    font-size:12px;
+    font-weight:700;
+    cursor:pointer;
+  }
+  .chat-input-row button:hover { background:var(--brass-soft); }
 
   /* Expandable Rules Component */
   .expandable-rules-container {
@@ -409,7 +434,6 @@
     max-height: 350px;
     overflow-y: auto;
   }
-
   .overlay{
     position:fixed;inset:0;
     background:rgba(20,18,14,.55);
@@ -437,10 +461,8 @@
 </head>
 <body>
 <div id="app"></div>
-
 <!-- Load Socket.IO Client -->
 <script src="/socket.io/socket.io.js"></script>
-
 <script>
 /* ===================== DATA ===================== */
 const COLORS = [
@@ -455,44 +477,45 @@ const COLORS = [
 ];
 const colorInfo = k => COLORS.find(c=>c.key===k);
 function isWildUnresolved(card){ return !!card.wild && card.color==null; }
-
 /* ===================== SOCKET & STATE ===================== */
 const socket = io();
 let currentRoom = "";
 let roomState = null;
 let errorMsg = "";
 let logs = [];
-
+let chatMessages = [];
 /* ===================== SOCKET LISTENERS ===================== */
 socket.on("gameStateUpdate", (state) => {
   roomState = state;
-  // Dynamically align table logs directly with live engine status outputs
   if (state.log) {
     logs = state.log;
+  }
+  if (state.chat) {
+    chatMessages = state.chat;
   }
   errorMsg = "";
   render();
 });
-
 socket.on("moveRejected", (reason) => {
   errorMsg = reason;
   render();
 });
-
 socket.on("playerDisconnected", (data) => {
   render();
 });
-
 socket.on("gameOver", (data) => {
   render();
 });
-
 /* ===================== HELPERS ===================== */
 function me(){
   return roomState ? roomState.me : null;
 }
+function isSpectator(){
+  if (!roomState) return false;
+  return !roomState.players.some(p => p.id === socket.id);
+}
 function isMyTurn(){
-  return !!roomState && roomState.activePlayer === socket.id;
+  return !!roomState && roomState.activePlayer === socket.id && !isSpectator();
 }
 function isMyWildAssignTurn() {
   if (!roomState || !roomState.wildAssign) return false;
@@ -504,7 +527,10 @@ function opponents(){
 function nameOf(id){
   if(!roomState) return '';
   const p = roomState.players.find(x=>x.id===id);
-  return p ? p.name : (id ? id.substring(0,5)+'...' : '');
+  if(p) return p.name;
+  const s = roomState.spectators ? roomState.spectators.find(x=>x.id===id) : null;
+  if(s) return s.name + " (Spectator)";
+  return id ? id.substring(0,5)+'...' : '';
 }
 function nameOfPerspective(id) {
   if (!roomState) return '';
@@ -516,7 +542,6 @@ function emitAction(event, payload){
   errorMsg = "";
   socket.emit(event, Object.assign({ roomCode: currentRoom }, payload||{}));
 }
-
 /* ===================== ACTIONS (emit to server) ===================== */
 function joinRoom() {
   const codeInput = document.getElementById("roomCodeInput");
@@ -529,29 +554,35 @@ function joinRoom() {
     alert("Please enter a valid room code!");
     return;
   }
-
   currentRoom = code;
-  
-  // Pass object context payloads targeting custom name variables
   socket.emit("joinRoom", { roomCode: currentRoom, name: userName });
 }
-
+function startGame() {
+  emitAction("startGame");
+}
+function sendChat() {
+  const input = document.getElementById("chatInputField");
+  if (!input || !input.value.trim()) return;
+  emitAction("sendChat", { text: input.value.trim() });
+  input.value = "";
+}
+function handleChatKeyPress(event) {
+  if (event.key === "Enter") {
+    sendChat();
+  }
+}
 function beginChallengeAction(){ emitAction("chooseAction", { actionType: "challenge" }); }
 function humanSwapBegin(){ emitAction("chooseAction", { actionType: "swap" }); }
 function humanPickUp(){ emitAction("pickUp"); }
-
 function humanChooseTarget(targetId){ emitAction("chooseTarget", { targetId }); }
 function humanSwapChooseTarget(targetId){ emitAction("swapChooseTarget", { targetId }); }
-
 function humanChooseType(type){ emitAction("chooseChallengeType", { challengeType: type }); }
 function humanChooseValue(value){ emitAction("chooseChallengeValue", { value }); }
-
 function humanSelectCard(cardId){
   emitAction("selectCard", { cardId });
 }
 function beginNumberWildAssign(cardId){ emitAction("includeWild", { cardId }); }
 function humanLockIn(){ emitAction("lockInChallenge"); }
-
 function wildPickColor(color){
   const wa = roomState.wildAssign;
   emitAction("assignWild", { cardId: wa.cardId, color, num: wa.needNumber ? null : undefined });
@@ -560,16 +591,12 @@ function wildPickNumber(num){
   const wa = roomState.wildAssign;
   emitAction("assignWild", { cardId: wa.cardId, color: wa.color, num });
 }
-
 function humanDefendCardClick(cardId){ emitAction("defendCard", { cardId }); }
 function beginDefenseNumberWildAssign(cardId){ emitAction("includeDefenseWild", { cardId }); }
 function finalizeDefenseNumberWilds(){ emitAction("lockInDefense"); }
-
 function humanSwapSelectCard(cardId){ emitAction("swapSelectCard", { cardId }); }
 function humanSwapLockIn(){ emitAction("swapLockIn"); }
-
 function continueAfterReveal(){ emitAction("continueAfterReveal"); }
-
 /* ===================== RENDER: CARDS & OPPONENTS ===================== */
 function renderCard(card, opts={}){
   opts = opts||{};
@@ -580,7 +607,6 @@ function renderCard(card, opts={}){
   if(opts.won) cls.push('won');
   if(opts.lost) cls.push('lost');
   if(opts.disabled) cls.push('disabled');
-
   if(isWildUnresolved(card)){
     cls.push('wild-card');
     return `<div class="${cls.join(' ')}" ${opts.onclick? `onclick="${opts.onclick}"`:''} data-card="${card.id}">
@@ -589,7 +615,6 @@ function renderCard(card, opts={}){
       <div class="corner bottom">✦</div>
     </div>`;
   }
-
   const info = colorInfo(card.color);
   const star = card.wasWild ? `<div class="wild-marker">✦</div>` : '';
   return `<div class="${cls.join(' ')}" style="background:${info.hex};color:${info.text};"
@@ -600,10 +625,9 @@ function renderCard(card, opts={}){
     <div class="corner bottom">${card.num}</div>
   </div>`;
 }
-
 function renderOpponent(p){
   const isTurn = roomState.phase!=='gameover' && roomState.activePlayer===p.id;
-  const targetable = roomState.phase==='choose-target' || roomState.phase==='swap-choose-target';
+  const targetable = !isSpectator() && (roomState.phase==='choose-target' || roomState.phase==='swap-choose-target');
   const onclickAttr = roomState.phase==='choose-target' ? `onclick="humanChooseTarget('${p.id}')"`
                      : roomState.phase==='swap-choose-target' ? `onclick="humanSwapChooseTarget('${p.id}')"`
                      : '';
@@ -615,17 +639,14 @@ function renderOpponent(p){
     <div class="cardback-stack">${backs}</div>
   </div>`;
 }
-
 /* ===================== RENDER: CENTER STAGE ===================== */
 function renderCenterStage(){
   let duelHtml = `<div class="idle-msg">Waiting for the next challenge…</div>`;
-
   if(['swap-choose-target','swap-choose-card'].includes(roomState.phase) && roomState.swap){
     const initName = nameOfPerspective(roomState.swap.initiatorId);
     const targName = roomState.swap.targetId ? nameOfPerspective(roomState.swap.targetId) : '…';
     duelHtml = `<div class="idle-msg">🔄 ${initName} is arranging a swap with ${targName}</div>`;
   }
-
   const challengePhases = ['choose-type','choose-value','choose-card','awaiting-human-defense','assign-wild','defense-number-wild-choice','revealing','reveal'];
   if(challengePhases.includes(roomState.phase) && roomState.challenge){
     const ch = roomState.challenge;
@@ -640,7 +661,6 @@ function renderCenterStage(){
           <div class="trump-badge number-badge">${ch.value}</div></div>`;
       }
     }
-
     let cardsHtml='';
     if(roomState.phase==='revealing'){
       cardsHtml = `<div class="idle-msg">Revealing…</div>`;
@@ -659,27 +679,31 @@ function renderCenterStage(){
         <div class="duel-side"><div class="who">${nameOfPerspective(r.targetId)}</div><div style="display:flex;gap:4px;">${tCardsHtml}</div></div>
       </div>`;
     }
-
     duelHtml = `<div style="display:flex;flex-direction:column;align-items:center;gap:10px;">
       ${badgeHtml}
       ${cardsHtml}
     </div>`;
   }
-
   return `<div class="center-stage">
     <div class="pile-info">Draw<span class="count">${roomState.drawCount}</span></div>
     <div class="duel-area">${duelHtml}</div>
     <div class="pile-info">Discard<span class="count">${roomState.discardCount}</span></div>
   </div>`;
 }
-
 /* ===================== RENDER: STATUS / PROMPT / CONTROLS ===================== */
 function renderStatusBanner(){
   if(roomState.status === 'waiting'){
-    return `<div class="status-banner">Waiting for opponent... (${roomState.playerCount}/2 players)</div>`;
+    let startBtn = "";
+    if (roomState.players.length >= 2 && !isSpectator()) {
+      startBtn = `<br><button class="go-btn" style="margin-top:10px;" onclick="startGame()">▶ Start Game</button>`;
+    }
+    return `<div class="status-banner">Waiting for players... (${roomState.playerCount}/4 players joined)${startBtn}</div>`;
   }
   if(roomState.status === 'finished'){
     return `<div class="status-banner">${roomState.winner === socket.id ? '🏆 YOU WIN!' : '💀 DEFEAT'}</div>`;
+  }
+  if(isSpectator()) {
+    return `<div class="status-banner">👁 YOU ARE SPECTATING - Game In Progress</div>`;
   }
   const ch = roomState.challenge;
   const sw = roomState.swap;
@@ -693,13 +717,14 @@ function renderStatusBanner(){
   }
   return `<div class="status-banner">${text}</div>`;
 }
-
 function renderPrompt(){
+  if (isSpectator()) {
+    return `<div class="prompt">Spectating live game tracking activities...</div>`;
+  }
   const ch = roomState.challenge;
   const isPlaying = roomState.status === 'playing';
-  if(!isPlaying) return `<div class="prompt">Game paused/waiting...</div>`;
+  if(!isPlaying) return `<div class="prompt">Room is setup. Waiting for host to click Start Game...</div>`;
   
-  // Wild assignment phase prompt perspective isolation
   if (roomState.phase === 'assign-wild') {
      if (isMyWildAssignTurn()) {
          const wa = roomState.wildAssign;
@@ -709,7 +734,6 @@ function renderPrompt(){
          return `<div class="prompt">Waiting for ${nameOf(roomState.wildAssign.ownerId)} to assign their Wild card...</div>`;
      }
   }
-
   if (roomState.phase === 'awaiting-human-defense') {
       if (socket.id === ch.targetId) {
           const info = ch.type==='color' ? colorInfo(ch.value).label : ch.value;
@@ -720,7 +744,6 @@ function renderPrompt(){
           return `<div class="prompt">Awaiting defense choices from ${nameOf(ch.targetId)}...</div>`;
       }
   }
-
   if (roomState.phase === 'defense-number-wild-choice') {
       if (socket.id === ch.targetId) {
           return `<div class="prompt">You must match the exact card count (${ch.challengerCards.length} cards)! Include wilds as ${ch.value}s to reach it, then hit Reveal.</div>`;
@@ -728,7 +751,6 @@ function renderPrompt(){
           return `<div class="prompt">Awaiting defense confirmation choices from ${nameOf(ch.targetId)}...</div>`;
       }
   }
-
   if(!isMyTurn()) {
     return `<div class="prompt">Waiting for opponent to move...</div>`;
   }
@@ -763,11 +785,10 @@ function renderPrompt(){
   }
   return '';
 }
-
 function renderControls(){
+  if (isSpectator()) return '';
   const ch = roomState.challenge;
   
-  // Wild assignment phase control isolation
   if (roomState.phase === 'assign-wild') {
      if (!isMyWildAssignTurn()) return '';
      const wa = roomState.wildAssign;
@@ -781,17 +802,13 @@ function renderControls(){
      }
      return '';
   }
-
-  if (roomState.phase === 'awaiting-human-defense') return ''; // Driven strictly by direct card selection interaction clicks
-
+  if (roomState.phase === 'awaiting-human-defense') return ''; 
   if (roomState.phase === 'defense-number-wild-choice') {
      if (socket.id !== ch.targetId) return '';
      const chips = (ch.pendingDefenseWilds||[]).map(id=>`<button class="choice-btn" onclick="beginDefenseNumberWildAssign('${id}')">✦ Include wild as ${ch.value}</button>`).join('');
      return `<div class="btn-row">${chips}<button class="confirm-btn" onclick="finalizeDefenseNumberWilds()">Reveal</button></div>`;
   }
-
   if(!isMyTurn()) return '';
-
   if(roomState.phase==='choose-action'){
     const myPlayer = roomState.players.find(p=>p.id===socket.id);
     const canSwap = myPlayer && !myPlayer.usedSwapLastTurn && me().hand.length>0;
@@ -839,8 +856,8 @@ function renderControls(){
   }
   return '';
 }
-
 function renderHand(){
+  if (isSpectator()) return `<div class="idle-msg">You are observing this match. Hand views hidden.</div>`;
   const myself = me();
   if(!myself) return '';
   const ch = roomState.challenge;
@@ -873,7 +890,6 @@ function renderHand(){
     return renderCard(c,{selectable, selected, disabled, onclick});
   }).join('');
 }
-
 /* ===================== RENDER: START / GAME OVER ===================== */
 function renderStartScreen() {
   document.getElementById('app').innerHTML = `
@@ -885,27 +901,26 @@ function renderStartScreen() {
       <p style="text-align: left; margin-bottom: 14px;">
         Chroma Clash is a tactical, real-time multiplayer card battle game of bluffs, trump calls, and counts. Players use a diverse 84-card elemental deck to out-score opponents through deliberate phase challenges, sight-unseen hand swaps, and high-stakes risk prediction.
       </p>
-
       <h2>GAME RULES</h2>
       <div class="rules">
-        • <b>The Deck Structure:</b> 84 cards total — 8 distinct colors × numbers 0–9, plus 4 versatile Wild cards. All players are dealt an initial hand setup of 10 cards.<br>
-        • <b>Turn Actions:</b> On your active turn, you draw a card, then must choose one of three actions: <b>Challenge</b> an opponent, <b>Swap</b> cards, or <b>Pick Up</b> an extra card.<br><br>
-        • <b>Action Restrictions:</b> Swap and Pick Up cannot be used two turns in a row.<br><br>
-        • <b>⚔️ Color Challenge Call:</b> You call a trump color and choose one card. Your target must play a matching color card if they hold one (Wild cards are exempt from forced matching). Higher card value within the trump color wins. The winner banks the absolute sum value of both played cards.<br>
+        • <b>The Room Rules:</b> Dynamic matchmaking allows 2 to 4 players to compete in a room simultaneously. Anyone who joins a room after the game has started will automatically join as a spectator[cite: 1].<br>
+        • <b>The Deck Structure:</b> 84 cards total — 8 distinct colors × numbers 0–9, plus 4 versatile Wild cards. All players are dealt an initial hand setup of 10 cards[cite: 1].<br>
+        • <b>Turn Actions:</b> On your active turn, you draw a card, then must choose one of three actions: <b>Challenge</b> an opponent, <b>Swap</b> cards, or <b>Pick Up</b> an extra card[cite: 1].<br><br>
+        • <b>Action Restrictions:</b> Swap and Pick Up cannot be used two turns in a row[cite: 1].<br><br>
+        • <b>⚔️ Color Challenge Call:</b> You call a trump color and choose one card. Your target must play a matching color card if they hold one (Wild cards are exempt from forced matching). Higher card value within the trump color wins. The winner banks the absolute sum value of both played cards[cite: 1].<br>
         <div class="visual-scenario">
           <b>Visual Example (Color Challenge):</b><br>
-          Challenger plays <b>[Red 7]</b> (Trump Call: Red) VS Target plays <b>[Red 3]</b> -> Challenger Wins and gains <b>10 pts</b> (7 + 3).<br>
-          Challenger plays <b>[Red 2]</b> (Trump Call: Red) VS Target plays <b>[Teal 9]</b> -> Challenger Wins (Trump beats non-trump) and gains <b>11 pts</b>.
+          Challenger plays <b>[Red 7]</b> (Trump Call: Red) VS Target plays <b>[Red 3]</b> -> Challenger Wins and gains <b>10 pts</b> (7 + 3)[cite: 1].<br>
+          Challenger plays <b>[Red 2]</b> (Trump Call: Red) VS Target plays <b>[Teal 9]</b> -> Challenger Wins (Trump beats non-trump) and gains <b>11 pts</b>[cite: 1].
         </div><br>
-        • <b>⚔️ Number Challenge Call:</b> Enforces a strict <b>Mandatory Matching Count Mechanic</b>. You call a number and put forward all your cards matching that value. <b>The defender must match the exact number of cards played by the challenger</b> using natural numbers or filling voids with Wilds. Whoever holds or builds the larger total volume wins a flat 15 points. If you initiate a number challenge and lose or tie, you are hit with a heavy <b>-15 point penalty</b>.<br>
+        • <b>⚔️ Number Challenge Call:</b> Enforces a strict <b>Mandatory Matching Count Mechanic</b>. You call a number and put forward all your cards matching that value. <b>The defender must match the exact number of cards played by the challenger</b> using natural numbers or filling voids with Wilds. Whoever holds or builds the larger total volume wins a flat 15 points. If you initiate a number challenge and lose or tie, you are hit with a heavy <b>-15 point penalty</b>[cite: 1].<br>
         <div class="visual-scenario">
           <b>Visual Example (Number Challenge Match Count):</b><br>
-          Challenger plays two cards: <b>[Blue 4]</b> and <b>[Green 4]</b> (Total: 2 cards). Defender holds one natural <b>[Orange 4]</b>. Defender <i>must</i> assign a <b>[Wild]</b> card to count as a '4' to reach the exact matching length of 2 cards.
+          Challenger plays two cards: <b>[Blue 4]</b> and <b>[Green 4]</b> (Total: 2 cards). Defender holds one natural <b>[Orange 4]</b>. Defender <i>must</i> assign a <b>[Wild]</b> card to count as a '4' to reach the exact matching length of 2 cards[cite: 1].
         </div><br>
-        • <b>✨ Wild Cards:</b> Right before playing a Wild, you decide what color and number it represents. Whoever plays the card controls its assignment choices directly on their own screen.<br><br>
-        • <b>Fresh Draw Rule:</b> If your hand drops to zero cards, you instantly draw 5 fresh cards (requires at least 10 cards left in the draw pile). The game terminates when the draw pile runs dry. Highest score wins!
+        • <b>✨ Wild Cards:</b> Right before playing a Wild, you decide what color and number it represents. Whoever plays the card controls its assignment choices directly on their own screen[cite: 1].<br><br>
+        • <b>Fresh Draw Rule:</b> If your hand drops to zero cards, you instantly draw 5 fresh cards (requires at least 10 cards left in the draw pile). The game terminates when the draw pile runs dry. Highest score wins![cite: 1]
       </div>
-
       <div style="margin: 20px 0;">
         <input type="text" id="playerNameInput" class="room-input" placeholder="ENTER YOUR NAME" max-length="16" />
         <br>
@@ -916,7 +931,6 @@ function renderStartScreen() {
     </div>
   `;
 }
-
 function renderGameOver(){
   const sorted = [...roomState.players].sort((a,b)=>b.score-a.score);
   const rows = sorted.map((p,i)=>`<div class="standing ${i===0?'winner':''}">
@@ -930,48 +944,44 @@ function renderGameOver(){
     <button class="go-btn" onclick="location.reload()">Play Again</button>
   </div></div>`;
 }
-
 /* ===================== MAIN RENDER ===================== */
 function render() {
   if (!roomState) {
     renderStartScreen();
     return;
   }
-
   const app = document.getElementById('app');
   const opponentsHtml = opponents().map(p=>renderOpponent(p)).join('');
   const centerHtml = renderCenterStage();
   const statusHtml = renderStatusBanner();
   const logHtml = logs.slice(-20).map(l => `<div>${l}</div>`).join('');
-
+  const chatHtml = chatMessages.map(m => `<div><b>${m.user}:</b> ${m.text}</div>`).join('');
   const promptHtml = renderPrompt();
   const controlsHtml = renderControls();
   const handHtml = renderHand();
   const myself = me();
-
+  
   const bottomHtml = `<div class="player-area">
     <div class="player-head">
-      <div class="who">${myself ? myself.name : 'You'} ${isMyTurn() && roomState.status==='playing' ? '🎲':''}</div>
-      <div class="sc">${myself ? myself.score : 0}</div>
+      <div class="who">${isSpectator() ? 'Spectating Profile' : (myself ? myself.name : 'You')} ${isMyTurn() && roomState.status==='playing' ? '🎲':''}</div>
+      <div class="sc">${isSpectator() ? '👁' : (myself ? myself.score : 0)}</div>
     </div>
     ${errorMsg ? `<div style="color:var(--danger); text-align:center; margin-bottom:10px; font-weight:bold;">⚠️ ${errorMsg}</div>` : ''}
     <div class="hand">${handHtml}</div>
     ${promptHtml}
     ${controlsHtml}
   </div>`;
-
+  
   app.innerHTML = `
     <h1 class="brand">Chroma Clash</h1>
     <div class="tagline">Room: ${currentRoom}</div>
     ${statusHtml}
-
     <div class="game-layout">
       <div class="game-main">
         <div class="opponents">${opponentsHtml}</div>
         ${centerHtml}
         ${bottomHtml}
       </div>
-
       <div class="game-side">
         <!-- Live Expandable Rules Accompaniment Panel -->
         <div class="expandable-rules-container">
@@ -984,18 +994,31 @@ function render() {
             </div>
           </details>
         </div>
-
+        
+        <!-- Collapsible Table History Panel -->
         <div class="history-panel">
-          <div class="history-title">Table Activity</div>
-          <div class="log-panel">${logHtml}</div>
+          <details open>
+            <summary>📋 Table Activity</summary>
+            <div class="log-panel">${logHtml}</div>
+          </details>
+        </div>
+
+        <!-- Collapsible Player Chat Feature Box -->
+        <div class="chat-panel">
+          <details open>
+            <summary>💬 Player Chat</summary>
+            <div class="chat-log-panel">${chatHtml}</div>
+            <div class="chat-input-row">
+              <input type="text" id="chatInputField" placeholder="Type message..." onkeypress="handleChatKeyPress(event)" maxlength="80">
+              <button onclick="sendChat()">Send</button>
+            </div>
+          </details>
         </div>
       </div>
     </div>
-
     ${roomState.status==='finished' ? renderGameOver() : ''}
   `;
 }
-
 renderStartScreen();
 </script>
 </body>

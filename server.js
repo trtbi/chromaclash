@@ -1,15 +1,11 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
-
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
-
 app.use(express.static("public"));
-
 const rooms = {};
-
 const COLORS = [
     { key: "red", label: "Red" },
     { key: "orange", label: "Orange" },
@@ -20,7 +16,6 @@ const COLORS = [
     { key: "black", label: "Black" },
     { key: "teal", label: "Teal" }
 ];
-
 function buildDeck() {
     const deck = [];
     COLORS.forEach((c) => {
@@ -33,7 +28,6 @@ function buildDeck() {
     }
     return shuffle(deck);
 }
-
 function shuffle(arr) {
     for (let i = arr.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -41,7 +35,6 @@ function shuffle(arr) {
     }
     return arr;
 }
-
 function createGameState(roomCode) {
     return {
         roomCode,
@@ -49,6 +42,8 @@ function createGameState(roomCode) {
         draw: buildDeck(),
         discard: [],
         players: [], // { id, name, hand: [], score, usedSwapLastTurn, usedPickupLastTurn }
+        spectators: [], // { id, name } -> Handles extra joins gracefully[cite: 2]
+        participatingCount: 0, // Records active structural count at the start of the match
         activeTurnIndex: 0,
         phase: "turn-start",
         challenge: null,
@@ -56,21 +51,19 @@ function createGameState(roomCode) {
         wildAssign: null,
         reveal: null,
         winner: null,
-        log: ["Room created. Waiting for 2 players..."]
+        log: ["Room created. Waiting for up to 4 players..."],
+        chat: [] // Dynamic chat room state history clearing on game cycles
     };
 }
-
 function pushLog(room, msg) {
     room.log.push(msg);
     if (room.log.length > 50) room.log.shift();
 }
-
 function getPublicStateForPlayer(room, playerId) {
     const activePlayer = room.players[room.activeTurnIndex]
         ? room.players[room.activeTurnIndex].id
         : null;
     const mePlayer = room.players.find((p) => p.id === playerId);
-
     return {
         status: room.status,
         playerCount: room.players.length,
@@ -83,6 +76,7 @@ function getPublicStateForPlayer(room, playerId) {
             usedSwapLastTurn: p.usedSwapLastTurn,
             usedPickupLastTurn: p.usedPickupLastTurn
         })),
+        spectators: room.spectators,
         me: mePlayer
             ? {
                   id: mePlayer.id,
@@ -100,11 +94,12 @@ function getPublicStateForPlayer(room, playerId) {
         wildAssign: room.wildAssign,
         reveal: room.reveal,
         winner: room.winner,
-        log: room.log
+        log: room.log,
+        chat: room.chat
     };
 }
-
 function broadcastState(room) {
+    // Broadcast updates targeting active players[cite: 2]
     room.players.forEach((p) => {
         const playerSocket = io.sockets.sockets.get(p.id);
         if (playerSocket) {
@@ -114,8 +109,17 @@ function broadcastState(room) {
             );
         }
     });
+    // Broadcast match flow transparently to spectators[cite: 2]
+    room.spectators.forEach((s) => {
+        const specSocket = io.sockets.sockets.get(s.id);
+        if (specSocket) {
+            specSocket.emit(
+                "gameStateUpdate",
+                getPublicStateForPlayer(room, s.id)
+            );
+        }
+    });
 }
-
 function startTurn(room) {
     if (room.draw.length === 0) {
         endGame(room);
@@ -128,30 +132,26 @@ function startTurn(room) {
         room,
         `${player.name} drew a card. (${room.draw.length} left in pile)`
     );
-
     room.phase = "choose-action";
     broadcastState(room);
 }
-
 function finishTurn(room, actionTaken) {
     const activePlayer = room.players[room.activeTurnIndex];
-    activePlayer.usedSwapLastTurn = actionTaken === "swap";
-    activePlayer.usedPickupLastTurn = actionTaken === "pickup";
-
+    if(activePlayer) {
+        activePlayer.usedSwapLastTurn = actionTaken === "swap";
+        activePlayer.usedPickupLastTurn = actionTaken === "pickup";
+    }
     room.swap = null;
     room.challenge = null;
     room.wildAssign = null;
-
     if (room.draw.length === 0) {
         endGame(room);
         return;
     }
-
     room.activeTurnIndex = (room.activeTurnIndex + 1) % room.players.length;
     room.phase = "turn-start";
     startTurn(room);
 }
-
 function refillIfEmpty(room, player) {
     if (player.hand.length === 0 && room.draw.length >= 10) {
         const n = Math.min(5, room.draw.length);
@@ -159,14 +159,11 @@ function refillIfEmpty(room, player) {
         pushLog(room, `${player.name}'s hand hit zero — draws 5 fresh cards!`);
     }
 }
-
 function endGame(room) {
     room.status = "finished";
     room.phase = "gameover";
-
     const sorted = [...room.players].sort((a, b) => b.score - a.score);
     room.winner = sorted[0] ? sorted[0].id : null;
-
     pushLog(
         room,
         `Game Over! Winner: ${sorted[0] ? sorted[0].name : "Nobody"}`
@@ -174,12 +171,12 @@ function endGame(room) {
     broadcastState(room);
     io.to(room.roomCode).emit("gameOver", { winnerId: room.winner });
 }
-
 function resolveChallenge(room) {
     const ch = room.challenge;
     const challenger = room.players.find((p) => p.id === ch.challengerId);
     const target = room.players.find((p) => p.id === ch.targetId);
     let winner = null;
+    if (!challenger || !target) return;
 
     if (ch.type === "color") {
         if (ch.targetCards.length === 0) {
@@ -189,7 +186,6 @@ function resolveChallenge(room) {
             const tCard = ch.targetCards[0];
             const cMatch = cCard.color === ch.value;
             const tMatch = tCard.color === ch.value;
-
             if (cMatch && !tMatch) winner = "challenger";
             else if (tMatch && !cMatch) winner = "target";
             else if (cCard.num === tCard.num) winner = "challenger";
@@ -200,12 +196,10 @@ function resolveChallenge(room) {
         const tCount = ch.targetCards.length;
         if (cCount > tCount) winner = "challenger";
         else if (tCount > cCount) winner = "target";
-        else winner = null; // Tie breaker if identical counts match
+        else winner = null; 
     }
-
     let scoreGain = 0;
     let challengerPenalized = false;
-
     if (ch.type === "color") {
         if (winner) {
             scoreGain =
@@ -228,16 +222,13 @@ function resolveChallenge(room) {
             challengerPenalized = true;
         }
     }
-
     const cIds = new Set(ch.challengerCards.map((c) => c.id));
     const tIds = new Set(ch.targetCards.map((c) => c.id));
     challenger.hand = challenger.hand.filter((c) => !cIds.has(c.id));
     target.hand = target.hand.filter((c) => !tIds.has(c.id));
     room.discard.push(...ch.challengerCards, ...ch.targetCards);
-
     refillIfEmpty(room, challenger);
     refillIfEmpty(room, target);
-
     const winnerName =
         winner === "challenger"
             ? challenger.name
@@ -255,7 +246,6 @@ function resolveChallenge(room) {
             `${challenger.name} loses 15 pts for the failed number call.`
         );
     }
-
     room.reveal = {
         challengerId: ch.challengerId,
         targetId: ch.targetId,
@@ -265,123 +255,127 @@ function resolveChallenge(room) {
         scoreGain,
         challengerPenalized
     };
-
     room.phase = "reveal";
     broadcastState(room);
 }
-
 io.on("connection", (socket) => {
     console.log("Player connected:", socket.id);
-
     socket.on("joinRoom", (data) => {
-        // Support custom names object structure or raw code fallback string
         const roomCode = typeof data === 'object' ? data.roomCode : data;
         const customName = typeof data === 'object' ? data.name : null;
-
         socket.join(roomCode);
         socket.currentRoom = roomCode;
-
         if (!rooms[roomCode]) {
             rooms[roomCode] = createGameState(roomCode);
         }
-
         const room = rooms[roomCode];
+        
+        const playerNum = room.players.length + room.spectators.length + 1;
+        const playerName = (customName && customName.trim().length > 0) ? customName.trim() : `Player ${playerNum}`;
 
-        if (!room.players.some((p) => p.id === socket.id)) {
-            const playerNum = room.players.length + 1;
-            const playerName = (customName && customName.trim().length > 0) ? customName.trim() : `Player ${playerNum}`;
-            const initialHand = [];
-            for (let i = 0; i < 10; i++) {
-                if (room.draw.length > 0) initialHand.push(room.draw.pop());
-            }
-
-            room.players.push({
-                id: socket.id,
-                name: playerName,
-                hand: initialHand,
-                score: 0,
-                usedSwapLastTurn: false,
-                usedPickupLastTurn: false
-            });
-            pushLog(room, `${playerName} joined the room.`);
-        }
-
-        if (room.players.length >= 2 && room.status === "waiting") {
-            room.status = "playing";
-            pushLog(
-                room,
-                `Table ready with 2 players! Starting match...`
-            );
-            startTurn(room);
-        } else {
+        // Spectator Isolation Rule logic
+        if (room.status !== "waiting") {
+            room.spectators.push({ id: socket.id, name: playerName });
+            pushLog(room, `${playerName} joined as a spectator.`);
             broadcastState(room);
+            return;
         }
+
+        // 4-Player Room Limit Check
+        if (!room.players.some((p) => p.id === socket.id)) {
+            if (room.players.length >= 4) {
+                room.spectators.push({ id: socket.id, name: playerName });
+                pushLog(room, `${playerName} filled room limits — joining as a spectator.`);
+            } else {
+                const initialHand = [];
+                for (let i = 0; i < 10; i++) {
+                    if (room.draw.length > 0) initialHand.push(room.draw.pop());
+                }
+                room.players.push({
+                    id: socket.id,
+                    name: playerName,
+                    hand: initialHand,
+                    score: 0,
+                    usedSwapLastTurn: false,
+                    usedPickupLastTurn: false
+                });
+                pushLog(room, `${playerName} joined the room.`);
+            }
+        }
+        broadcastState(room);
+    });
+
+    socket.on("startGame", (data) => {
+        const { roomCode } = data;
+        const room = rooms[roomCode];
+        if (!room || room.status !== "waiting") return;
+        
+        // Ensure host initialization safety guard check
+        if (room.players.length >= 2) {
+            room.status = "playing";
+            room.participatingCount = room.players.length; // Explicitly mark absolute participating volume
+            room.chat = []; // Reset player chat box contents completely right before the game begins
+            pushLog(room, `Match started manually with ${room.participatingCount} active players!`);
+            startTurn(room);
+        }
+    });
+
+    socket.on("sendChat", (data) => {
+        const { roomCode, text } = data;
+        const room = rooms[roomCode];
+        if (!room || !text.trim()) return;
+        
+        let senderName = "Unknown";
+        const p = room.players.find(x => x.id === socket.id);
+        const s = room.spectators.find(x => x.id === socket.id);
+        if (p) senderName = p.name;
+        else if (s) senderName = s.name + " (Spec)";
+
+        room.chat.push({ user: senderName, text: text.trim() });
+        if (room.chat.length > 40) room.chat.shift();
+        broadcastState(room);
     });
 
     socket.on("chooseAction", (data) => {
         const { roomCode, actionType } = data;
         const room = rooms[roomCode];
         if (!room || room.status !== "playing") return;
-
         const activePlayer = room.players[room.activeTurnIndex];
         if (socket.id !== activePlayer.id) {
             socket.emit("moveRejected", "Not your turn!");
             return;
         }
-
         if (actionType === "challenge") {
-            const others = room.players.filter((p) => p.id !== socket.id);
-            if (others.length === 1) {
-                room.challenge = {
-                    challengerId: socket.id,
-                    targetId: others[0].id
-                };
-                room.phase = "choose-type";
-            } else {
-                room.challenge = { challengerId: socket.id };
-                room.phase = "choose-target";
-            }
+            room.challenge = { challengerId: socket.id };
+            room.phase = "choose-target";
         } else if (actionType === "swap") {
-            const others = room.players.filter((p) => p.id !== socket.id);
             room.swap = { initiatorId: socket.id };
-            if (others.length === 1) {
-                room.swap.targetId = others[0].id;
-                room.phase = "swap-choose-card";
-            } else {
-                room.phase = "swap-choose-target";
-            }
+            room.phase = "swap-choose-target";
         }
         broadcastState(room);
     });
-
     socket.on("chooseTarget", (data) => {
         const { roomCode, targetId } = data;
         const room = rooms[roomCode];
         if (!room || !room.challenge) return;
-
         room.challenge.targetId = targetId;
         room.phase = "choose-type";
         broadcastState(room);
     });
-
     socket.on("chooseChallengeType", (data) => {
         const { roomCode, challengeType } = data;
         const room = rooms[roomCode];
         if (!room || !room.challenge) return;
-
         room.challenge.type = challengeType;
         room.phase = "choose-value";
         broadcastState(room);
     });
-
     socket.on("chooseChallengeValue", (data) => {
         const { roomCode, value } = data;
         const room = rooms[roomCode];
         if (!room || !room.challenge) return;
-
         const ch = room.challenge;
         ch.value = value;
-
         if (ch.type === "number") {
             const me = room.players.find((p) => p.id === socket.id);
             ch.challengerCards = me.hand.filter(
@@ -393,23 +387,19 @@ io.on("connection", (socket) => {
         } else {
             ch.challengerCards = [];
         }
-
         room.phase = "choose-card";
         broadcastState(room);
     });
-
     socket.on("selectCard", (data) => {
         const { roomCode, cardId } = data;
         const room = rooms[roomCode];
         if (!room || !room.challenge) return;
-
         const me = room.players.find((p) => p.id === socket.id);
         const card = me.hand.find((c) => c.id === cardId);
-
         if (card && card.wild && card.color == null) {
             room.wildAssign = {
                 role: "challenger-card",
-                ownerId: socket.id, // Explicitly tracking action operator identity 
+                ownerId: socket.id, 
                 cardId,
                 needNumber: true,
                 color: null,
@@ -421,15 +411,12 @@ io.on("connection", (socket) => {
         }
         broadcastState(room);
     });
-
     socket.on("assignWild", (data) => {
         const { roomCode, cardId, color, num } = data;
         const room = rooms[roomCode];
         if (!room || !room.wildAssign) return;
-
         const wa = room.wildAssign;
         const ch = room.challenge;
-
         if (wa.role === "challenger-card") {
             const player = room.players.find((p) => p.id === ch.challengerId);
             const raw = player.hand.find((c) => c.id === cardId);
@@ -455,7 +442,6 @@ io.on("connection", (socket) => {
             ];
             room.wildAssign = null;
             
-            // Enforce Match Count Check: If defender played a lone wild card inside a number challenge context
             if (ch.type === "number" && ch.targetCards.length !== ch.challengerCards.length) {
                  socket.emit("moveRejected", `Mandatory Mechanic Violation: You must play exactly ${ch.challengerCards.length} cards!`);
                  ch.targetCards = [];
@@ -463,7 +449,6 @@ io.on("connection", (socket) => {
                  broadcastState(room);
                  return;
             }
-
             room.phase = "revealing";
             broadcastState(room);
             setTimeout(() => resolveChallenge(room), 600);
@@ -497,12 +482,10 @@ io.on("connection", (socket) => {
         }
         broadcastState(room);
     });
-
     socket.on("includeWild", (data) => {
         const { roomCode, cardId } = data;
         const room = rooms[roomCode];
         if (!room || !room.challenge) return;
-
         room.wildAssign = {
             role: "challenger-number-wild",
             ownerId: socket.id,
@@ -514,16 +497,13 @@ io.on("connection", (socket) => {
         room.phase = "assign-wild";
         broadcastState(room);
     });
-
     socket.on("lockInChallenge", (data) => {
         const { roomCode } = data;
         const room = rooms[roomCode];
         if (!room || !room.challenge) return;
-
         const ch = room.challenge;
         const challenger = room.players.find((p) => p.id === ch.challengerId);
         const target = room.players.find((p) => p.id === ch.targetId);
-
         if (ch.type === "color") {
             const raw = challenger.hand.find(
                 (c) => c.id === ch.selectedCardId
@@ -532,7 +512,6 @@ io.on("connection", (socket) => {
                 raw && raw.wild ? ch.resolvedSelectedCard : raw;
             ch.challengerCards = [card];
         }
-
         pushLog(
             room,
             `${challenger.name} challenged ${target.name} — calling ${
@@ -541,17 +520,14 @@ io.on("connection", (socket) => {
                     : `Number ${ch.value} as trump.`
             }`
         );
-
         if (target.hand.length === 0) {
             ch.targetCards = [];
             resolveChallenge(room);
             return;
         }
-
         if (ch.type === "color") {
             room.phase = "awaiting-human-defense";
         } else {
-            // Number challenge initialization setup
             const naturalMatches = target.hand.filter(
                 (c) => !c.wild && c.num === ch.value
             );
@@ -562,9 +538,7 @@ io.on("connection", (socket) => {
                 ch.pendingDefenseWilds = wilds.map((w) => w.id);
                 room.phase = "defense-number-wild-choice";
             } else {
-                // If no wilds are present, validate if target matching count directly equals challenger count
                 if (ch.targetCards.length !== ch.challengerCards.length) {
-                    // Introduce mechanic override enforcement rule: Forced to match count parameters no matter what
                     pushLog(room, `${target.name} lacks matching cards to stand up to the challenge baseline! Auto-resolving match.`);
                 }
                 room.phase = "revealing";
@@ -575,20 +549,17 @@ io.on("connection", (socket) => {
         }
         broadcastState(room);
     });
-
     socket.on("defendCard", (data) => {
         const { roomCode, cardId } = data;
         const room = rooms[roomCode];
         if (!room || !room.challenge) return;
-
         const ch = room.challenge;
         const target = room.players.find((p) => p.id === ch.targetId);
         const card = target.hand.find((c) => c.id === cardId);
-
         if (card && card.wild && card.color == null) {
             room.wildAssign = {
                 role: "defense-card",
-                ownerId: target.id, // Explicitly identify that the defender is choosing values
+                ownerId: target.id, 
                 cardId,
                 needNumber: true,
                 color: null,
@@ -598,22 +569,19 @@ io.on("connection", (socket) => {
             broadcastState(room);
             return;
         }
-
         ch.targetCards = [card];
         room.phase = "revealing";
         broadcastState(room);
         setTimeout(() => resolveChallenge(room), 600);
     });
-
     socket.on("includeDefenseWild", (data) => {
         const { roomCode, cardId } = data;
         const room = rooms[roomCode];
         if (!room || !room.challenge) return;
-
         const ch = room.challenge;
         room.wildAssign = {
             role: "defense-number-wild",
-            ownerId: ch.targetId, // Explicitly pass identity ownership tracking parameter mapping properties
+            ownerId: ch.targetId, 
             cardId,
             needNumber: false,
             color: null,
@@ -622,78 +590,60 @@ io.on("connection", (socket) => {
         room.phase = "assign-wild";
         broadcastState(room);
     });
-
     socket.on("lockInDefense", (data) => {
         const { roomCode } = data;
         const room = rooms[roomCode];
         if (!room || !room.challenge) return;
-
         const ch = room.challenge;
-        const target = room.players.find((p) => p.id === ch.targetId);
-
-        // Enforce rule alignment restriction checkpoint guard: Target must exactly match the length count parameter
         if (ch.type === "number" && ch.targetCards.length !== ch.challengerCards.length) {
             socket.emit("moveRejected", `Mandatory Mechanic Violation: You must match the exact count (${ch.challengerCards.length} cards) played by your challenger!`);
             return;
         }
-
         room.phase = "revealing";
         broadcastState(room);
         setTimeout(() => resolveChallenge(room), 600);
     });
-
     socket.on("swapChooseTarget", (data) => {
         const { roomCode, targetId } = data;
         const room = rooms[roomCode];
         if (!room || !room.swap) return;
-
         room.swap.targetId = targetId;
         room.phase = "swap-choose-card";
         broadcastState(room);
     });
-
     socket.on("swapSelectCard", (data) => {
         const { roomCode, cardId } = data;
         const room = rooms[roomCode];
         if (!room || !room.swap) return;
-
         room.swap.myCardId = cardId;
         broadcastState(room);
     });
-
     socket.on("swapLockIn", (data) => {
         const { roomCode } = data;
         const room = rooms[roomCode];
         if (!room || !room.swap) return;
-
         const sw = room.swap;
         const me = room.players.find((p) => p.id === sw.initiatorId);
         const target = room.players.find((p) => p.id === sw.targetId);
-
         const myCard = me.hand.find((c) => c.id === sw.myCardId);
         if (target.hand.length === 0) {
             pushLog(room, `${me.name} tried to swap, but target had no cards!`);
             finishTurn(room, "swap");
             return;
         }
-
         const theirCard =
             target.hand[Math.floor(Math.random() * target.hand.length)];
         me.hand = me.hand.filter((c) => c.id !== myCard.id);
         target.hand = target.hand.filter((c) => c.id !== theirCard.id);
-
         me.hand.push(theirCard);
         target.hand.push(myCard);
-
         pushLog(room, `${me.name} swapped a card with ${target.name}.`);
         finishTurn(room, "swap");
     });
-
     socket.on("pickUp", (data) => {
         const { roomCode } = data;
         const room = rooms[roomCode];
         if (!room) return;
-
         const me = room.players.find((p) => p.id === socket.id);
         if (room.draw.length > 0) {
             const card = room.draw.pop();
@@ -705,42 +655,37 @@ io.on("connection", (socket) => {
         }
         finishTurn(room, "pickup");
     });
-
     socket.on("continueAfterReveal", (data) => {
         const { roomCode } = data;
         const room = rooms[roomCode];
         if (!room) return;
-
         room.reveal = null;
         finishTurn(room, "challenge");
     });
-
     socket.on("disconnect", () => {
         console.log("Player disconnected:", socket.id);
         const roomCode = socket.currentRoom;
         if (!roomCode || !rooms[roomCode]) return;
-
         const room = rooms[roomCode];
+        
         const leavingPlayer = room.players.find((p) => p.id === socket.id);
-        const leavingName = leavingPlayer ? leavingPlayer.name : socket.id.substring(0, 5);
-
-        room.players = room.players.filter((p) => p.id !== socket.id);
-
-        io.to(roomCode).emit("playerDisconnected", {
-            disconnectedPlayerId: socket.id,
-            name: leavingName
-        });
-
-        if (room.players.length < 2 && room.status === "playing") {
-            room.status = "waiting";
-            room.phase = "turn-start";
-            pushLog(
-                room,
-                `Player ${leavingName} disconnected. Pausing match until another joins...`
-            );
+        const leavingSpec = room.spectators.find((s) => s.id === socket.id);
+        
+        if (leavingPlayer) {
+            const leavingName = leavingPlayer.name;
+            room.players = room.players.filter((p) => p.id !== socket.id);
+            io.to(roomCode).emit("playerDisconnected", { disconnectedPlayerId: socket.id, name: leavingName });
+            
+            if (room.players.length < 2 && room.status === "playing") {
+                room.status = "waiting";
+                room.phase = "turn-start";
+                pushLog(room, `Player ${leavingName} left. Pausing match until someone replaces them or game restarts...`);
+            }
+        } else if (leavingSpec) {
+            room.spectators = room.spectators.filter((s) => s.id !== socket.id);
         }
 
-        if (room.players.length === 0) {
+        if (room.players.length === 0 && room.spectators.length === 0) {
             delete rooms[roomCode];
             console.log(`Room ${roomCode} deleted.`);
         } else {
@@ -748,7 +693,6 @@ io.on("connection", (socket) => {
         }
     });
 });
-
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`ChromaClash server running on port ${PORT}`);
