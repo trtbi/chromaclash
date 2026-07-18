@@ -20,12 +20,9 @@ function buildDeck() {
     const deck = [];
     COLORS.forEach((c) => {
         for (let n = 0; n <= 9; n++) {
-            deck.push({ id: `${c.key}-${n}`, color: c.key, num: n, wild: false });
+            deck.push({ id: `${c.key}-${n}`, color: c.key, num: n });
         }
     });
-    for (let i = 1; i <= 4; i++) {
-        deck.push({ id: `wild-${i}`, color: null, num: null, wild: true });
-    }
     return shuffle(deck);
 }
 function shuffle(arr) {
@@ -48,7 +45,6 @@ function createGameState(roomCode) {
         phase: "turn-start",
         challenge: null,
         swap: null,
-        wildAssign: null,
         reveal: null,
         winner: null,
         log: ["Room created. Waiting for up to 4 players..."],
@@ -73,7 +69,6 @@ function snapshotRoom(room) {
             phase: room.phase,
             challenge: room.challenge,
             swap: room.swap,
-            wildAssign: room.wildAssign,
             reveal: room.reveal,
             winner: room.winner,
             log: room.log
@@ -112,7 +107,6 @@ function getPublicStateForPlayer(room, playerId) {
         discardCount: room.discard.length,
         challenge: room.challenge,
         swap: room.swap,
-        wildAssign: room.wildAssign,
         reveal: room.reveal,
         winner: room.winner,
         log: room.log,
@@ -164,7 +158,6 @@ function finishTurn(room, actionTaken) {
     }
     room.swap = null;
     room.challenge = null;
-    room.wildAssign = null;
     if (room.draw.length === 0) {
         endGame(room);
         return;
@@ -403,12 +396,7 @@ io.on("connection", (socket) => {
         ch.value = value;
         if (ch.type === "number") {
             const me = room.players.find((p) => p.id === socket.id);
-            ch.challengerCards = me.hand.filter(
-                (c) => !c.wild && c.num === value
-            );
-            ch.pendingWilds = me.hand
-                .filter((c) => c.wild)
-                .map((c) => c.id);
+            ch.challengerCards = me.hand.filter((c) => c.num === value);
         } else {
             ch.challengerCards = [];
         }
@@ -420,109 +408,7 @@ io.on("connection", (socket) => {
         const room = rooms[roomCode];
         if (!room || !room.challenge) return;
         snapshotRoom(room);
-        const me = room.players.find((p) => p.id === socket.id);
-        const card = me.hand.find((c) => c.id === cardId);
-        if (card && card.wild && card.color == null) {
-            room.wildAssign = {
-                role: "challenger-card",
-                ownerId: socket.id, 
-                cardId,
-                needNumber: true,
-                color: null,
-                num: null
-            };
-            room.phase = "assign-wild";
-        } else {
-            room.challenge.selectedCardId = cardId;
-        }
-        broadcastState(room);
-    });
-    socket.on("assignWild", (data) => {
-        const { roomCode, cardId, color, num } = data;
-        const room = rooms[roomCode];
-        if (!room || !room.wildAssign) return;
-        snapshotRoom(room);
-        const wa = room.wildAssign;
-        const ch = room.challenge;
-        if (wa.role === "challenger-card") {
-            const player = room.players.find((p) => p.id === ch.challengerId);
-            const raw = player.hand.find((c) => c.id === cardId);
-            ch.selectedCardId = cardId;
-            ch.resolvedSelectedCard = {
-                ...raw,
-                color,
-                num: wa.needNumber ? num : ch.value,
-                wasWild: true
-            };
-            room.wildAssign = null;
-            room.phase = "choose-card";
-        } else if (wa.role === "defense-card") {
-            const player = room.players.find((p) => p.id === ch.targetId);
-            const raw = player.hand.find((c) => c.id === cardId);
-            ch.targetCards = [
-                {
-                    ...raw,
-                    color,
-                    num: wa.needNumber ? num : ch.value,
-                    wasWild: true
-                }
-            ];
-            room.wildAssign = null;
-            
-            if (ch.type === "number" && ch.targetCards.length !== ch.challengerCards.length) {
-                 socket.emit("moveRejected", `Mandatory Mechanic Violation: You must play exactly ${ch.challengerCards.length} cards!`);
-                 ch.targetCards = [];
-                 room.phase = "defense-number-wild-choice";
-                 broadcastState(room);
-                 return;
-            }
-            room.phase = "revealing";
-            broadcastState(room);
-            setTimeout(() => resolveChallenge(room), 600);
-            return;
-        } else if (wa.role === "challenger-number-wild") {
-            const player = room.players.find((p) => p.id === ch.challengerId);
-            const raw = player.hand.find((c) => c.id === cardId);
-            ch.challengerCards.push({
-                ...raw,
-                color,
-                num: ch.value,
-                wasWild: true
-            });
-            ch.pendingWilds = ch.pendingWilds.filter((id) => id !== cardId);
-            room.wildAssign = null;
-            room.phase = "choose-card";
-        } else if (wa.role === "defense-number-wild-choice" || wa.role === "defense-number-wild") {
-            const player = room.players.find((p) => p.id === ch.targetId);
-            const raw = player.hand.find((c) => c.id === cardId);
-            ch.targetCards.push({
-                ...raw,
-                color,
-                num: ch.value,
-                wasWild: true
-            });
-            ch.pendingDefenseWilds = ch.pendingDefenseWilds.filter(
-                (id) => id !== cardId
-            );
-            room.wildAssign = null;
-            room.phase = "defense-number-wild-choice";
-        }
-        broadcastState(room);
-    });
-    socket.on("includeWild", (data) => {
-        const { roomCode, cardId } = data;
-        const room = rooms[roomCode];
-        if (!room || !room.challenge) return;
-        snapshotRoom(room);
-        room.wildAssign = {
-            role: "challenger-number-wild",
-            ownerId: socket.id,
-            cardId,
-            needNumber: false,
-            color: null,
-            num: null
-        };
-        room.phase = "assign-wild";
+        room.challenge.selectedCardId = cardId;
         broadcastState(room);
     });
     socket.on("lockInChallenge", (data) => {
@@ -534,11 +420,9 @@ io.on("connection", (socket) => {
         const challenger = room.players.find((p) => p.id === ch.challengerId);
         const target = room.players.find((p) => p.id === ch.targetId);
         if (ch.type === "color") {
-            const raw = challenger.hand.find(
+            const card = challenger.hand.find(
                 (c) => c.id === ch.selectedCardId
             );
-            const card =
-                raw && raw.wild ? ch.resolvedSelectedCard : raw;
             ch.challengerCards = [card];
         }
         pushLog(
@@ -557,24 +441,16 @@ io.on("connection", (socket) => {
         if (ch.type === "color") {
             room.phase = "awaiting-human-defense";
         } else {
-            const naturalMatches = target.hand.filter(
-                (c) => !c.wild && c.num === ch.value
+            ch.targetCards = target.hand.filter(
+                (c) => c.num === ch.value
             );
-            const wilds = target.hand.filter((c) => c.wild);
-            ch.targetCards = naturalMatches;
-            
-            if (wilds.length > 0) {
-                ch.pendingDefenseWilds = wilds.map((w) => w.id);
-                room.phase = "defense-number-wild-choice";
-            } else {
-                if (ch.targetCards.length !== ch.challengerCards.length) {
-                    pushLog(room, `${target.name} lacks matching cards to stand up to the challenge baseline! Auto-resolving match.`);
-                }
-                room.phase = "revealing";
-                broadcastState(room);
-                setTimeout(() => resolveChallenge(room), 600);
-                return;
+            if (ch.targetCards.length !== ch.challengerCards.length) {
+                pushLog(room, `${target.name} lacks matching cards to stand up to the challenge baseline! Auto-resolving match.`);
             }
+            room.phase = "revealing";
+            broadcastState(room);
+            setTimeout(() => resolveChallenge(room), 600);
+            return;
         }
         broadcastState(room);
     });
@@ -586,40 +462,10 @@ io.on("connection", (socket) => {
         const ch = room.challenge;
         const target = room.players.find((p) => p.id === ch.targetId);
         const card = target.hand.find((c) => c.id === cardId);
-        if (card && card.wild && card.color == null) {
-            room.wildAssign = {
-                role: "defense-card",
-                ownerId: target.id, 
-                cardId,
-                needNumber: true,
-                color: null,
-                num: null
-            };
-            room.phase = "assign-wild";
-            broadcastState(room);
-            return;
-        }
         ch.targetCards = [card];
         room.phase = "revealing";
         broadcastState(room);
         setTimeout(() => resolveChallenge(room), 600);
-    });
-    socket.on("includeDefenseWild", (data) => {
-        const { roomCode, cardId } = data;
-        const room = rooms[roomCode];
-        if (!room || !room.challenge) return;
-        snapshotRoom(room);
-        const ch = room.challenge;
-        room.wildAssign = {
-            role: "defense-number-wild",
-            ownerId: ch.targetId, 
-            cardId,
-            needNumber: false,
-            color: null,
-            num: null
-        };
-        room.phase = "assign-wild";
-        broadcastState(room);
     });
     socket.on("lockInDefense", (data) => {
         const { roomCode } = data;
@@ -716,7 +562,6 @@ io.on("connection", (socket) => {
         room.phase = snap.phase;
         room.challenge = snap.challenge;
         room.swap = snap.swap;
-        room.wildAssign = snap.wildAssign;
         room.reveal = snap.reveal;
         room.winner = snap.winner;
         room.log = snap.log;

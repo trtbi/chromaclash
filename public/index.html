@@ -274,12 +274,6 @@
   .card.selectable:hover{transform:translateY(-6px);}
   .card.selected{outline:3px solid var(--brass); transform:translateY(-8px);}
   .card.disabled{opacity:.32;filter:grayscale(35%);cursor:default;}
-  .card.wild-card{
-    background:linear-gradient(135deg, #E5484D, #F76B15, #FFD60A, #30A46C, #EC4899, #17181b);
-    color:#fff;
-  }
-  .card.wild-card .mid{font-size:10.5px;letter-spacing:.04em;}
-  .card .wild-marker{position:absolute;top:2px;right:4px;font-size:10px;color:#FFD60A;text-shadow:0 0 3px rgba(0,0,0,.6);}
   /* Player area */
   .player-area{
     background:var(--panel);
@@ -476,7 +470,6 @@ const COLORS = [
   {key:'teal',   label:'Teal',   hex:'#14B8A6', text:'#06231f'},
 ];
 const colorInfo = k => COLORS.find(c=>c.key===k);
-function isWildUnresolved(card){ return !!card.wild && card.color==null; }
 /* ===================== SOCKET & STATE ===================== */
 const socket = io();
 let currentRoom = "";
